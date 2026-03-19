@@ -1,0 +1,29 @@
+# --- Project Structure ---
+data/
+tools/
+temp/
+analysis/
+.nextflow/
+work/
+.nextflow.log*
+
+# --- Environment and Credentials ---
+.env
+.DS_Store
+
+# --- Ancillary and Raw Logs ---
+files.txt
+*.log
+*.zip
+*.tar.gz
+*.csv
+!pipeline/**.csv
+!src/**.csv
+
+# --- Specific Non-Pipeline Src ---
+src/test/
+
+# --- Keep Core Logic ---
+!README.md
+!pipeline/
+!src/

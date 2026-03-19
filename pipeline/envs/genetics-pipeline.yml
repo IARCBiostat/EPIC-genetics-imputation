@@ -1,0 +1,12 @@
+name: genetics-pipeline
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=2.7
+  - plink=1.90
+  - bcftools=1.19
+  - htslib=1.19
+  - r-base=4.3
+  - samtools=1.19
