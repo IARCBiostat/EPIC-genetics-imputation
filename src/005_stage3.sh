@@ -1,0 +1,415 @@
+#!/bin/bash
+#SBATCH --job-name=stage3
+#SBATCH --output=src/logs/stage3.out
+#SBATCH --error=src/logs/stage3.err
+#SBATCH --time=10-00:00:00
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --partition=low_p
+
+set -euo pipefail
+trap 'echo "ERROR: Stage-3 pipeline failed on line $LINENO" >&2; exit 1' ERR
+
+SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_PATH="${SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]:-$0}")"
+DEFAULT_PROJ_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
+
+is_repo_root() {
+  local candidate="$1"
+  [ -d "${candidate}/src" ] && \
+  [ -d "${candidate}/pipeline_stage3" ] && \
+  [ -d "${candidate}/analysis" ]
+}
+
+resolve_project_root() {
+  local candidates=()
+  local candidate
+  local resolved
+
+  [ -n "${SLURM_SUBMIT_DIR:-}" ] && candidates+=("${SLURM_SUBMIT_DIR}")
+  candidates+=("${SCRIPT_DIR}/.." "$(pwd)")
+  [ -n "${GENETICS_PROJECT_ROOT:-}" ] && candidates+=("${GENETICS_PROJECT_ROOT}")
+  candidates+=("${DEFAULT_PROJ_ROOT}")
+
+  for candidate in "${candidates[@]}"; do
+    [ -z "$candidate" ] && continue
+    if resolved="$(cd "$candidate" 2>/dev/null && pwd)"; then
+      if is_repo_root "$resolved"; then
+        printf '%s\n' "$resolved"
+        return 0
+      fi
+    fi
+  done
+
+  echo "ERROR: Could not resolve the EPIC genetics repo root." >&2
+  return 1
+}
+
+abs_path() {
+  local target="$1"
+  if [ -d "$target" ]; then
+    (cd "$target" && pwd)
+  else
+    local parent
+    parent="$(dirname "$target")"
+    parent="$(cd "$parent" 2>/dev/null && pwd)"
+    printf '%s/%s\n' "$parent" "$(basename "$target")"
+  fi
+}
+
+resolve_dbsnp_vcf() {
+  local candidate
+  local search_dir="${PROJ_ROOT}/data/reference/dbsnp"
+
+  [ -n "${STAGE3_DBSNP_VCF:-}" ] && candidate="${STAGE3_DBSNP_VCF}"
+  if [ -n "${candidate:-}" ] && [ -f "${candidate}" ]; then
+    printf '%s\n' "$(abs_path "${candidate}")"
+    return 0
+  fi
+
+  candidate="$(find "${search_dir}" -maxdepth 1 -type f -name 'GCF_000001405.*.gz' ! -name '*.tbi' | sort -V | tail -n 1 || true)"
+  if [ -n "${candidate}" ] && [ -f "${candidate}" ]; then
+    printf '%s\n' "$(abs_path "${candidate}")"
+    return 0
+  fi
+
+  echo "ERROR: Could not resolve a dbSNP GRCh38 VCF under ${search_dir}" >&2
+  return 1
+}
+
+resolve_dbsnp_tbi() {
+  local dbsnp_vcf="$1"
+  local candidate="${STAGE3_DBSNP_TBI:-${dbsnp_vcf}.tbi}"
+  if [ -f "${candidate}" ]; then
+    printf '%s\n' "$(abs_path "${candidate}")"
+    return 0
+  fi
+
+  echo "ERROR: dbSNP index not found: ${candidate}" >&2
+  return 1
+}
+
+print_help() {
+  cat <<'EOF'
+Usage: sbatch src/005_stage3.sh [options]
+
+Options:
+  --profile <name>                  Nextflow profile to use (default: slurm)
+  --study <list>                    Comma-separated study IDs to process (default: all)
+  --out <dir>                       Analysis root where <STUDY>/stage3/ will be written
+  --stage1-root <dir>               Root directory containing analysis/<STUDY>/stage1 outputs
+  --stage2-root <dir>               Root directory containing analysis/<STUDY>/stage2 outputs
+  --dbsnp-vcf <file>                dbSNP GRCh38 VCF for rsID annotation
+  --dbsnp-tbi <file>                dbSNP GRCh38 VCF index
+  --partition <name>                Slurm partition for internal Nextflow task submissions
+  --min-r2 <value>                  Minimum imputation R2 (default: 0.3)
+  --maf <value>                     Minimum MAF (default: 0.01)
+  --hwe-p <value>                   HWE p-value threshold (default: 0.000005)
+  --no-hwe                          Disable HWE filtering
+  --exclude-ancestry-outliers       Exclude ancestry outliers from the final dataset
+  --no-exclude-ancestry-outliers    Keep ancestry outliers in the final dataset
+  --no-resume                       Disable Nextflow -resume
+  -h, --help                        Show this help
+EOF
+}
+
+if [ -z "${SLURM_JOB_ID:-}" ]; then
+  PROJ_ROOT="$(resolve_project_root)"
+  mkdir -p "${PROJ_ROOT}/src/logs"
+  cd "$PROJ_ROOT"
+
+  if ! command -v sbatch >/dev/null 2>&1; then
+    echo "ERROR: sbatch is not available. Submit this script from the HPC login node." >&2
+    exit 1
+  fi
+
+  echo "Submitting stage-3 pipeline to Slurm..."
+  sbatch \
+    --export=ALL \
+    --job-name "${STAGE3_JOB_NAME:-stage3_postimpute}" \
+    --output "${STAGE3_LOG_OUT:-${PROJ_ROOT}/src/logs/005_stage3_%j.out}" \
+    --error "${STAGE3_LOG_ERR:-${PROJ_ROOT}/src/logs/005_stage3_%j.err}" \
+    --time "${STAGE3_TIME:-10-00:00:00}" \
+    --mem "${STAGE3_MEM:-32G}" \
+    --cpus-per-task "${STAGE3_CPUS:-4}" \
+    --partition "${STAGE3_PARTITION:-low_p}" \
+    "${SCRIPT_PATH}" "$@"
+  exit 0
+fi
+
+start_time=$(date +%s)
+
+for env_file in ".env" \
+                "${DEFAULT_PROJ_ROOT}/.env" \
+                "${SCRIPT_DIR}/../.env" \
+                "${DEFAULT_PROJ_ROOT}/pipeline_stage3/.env" \
+                "${SCRIPT_DIR}/../pipeline_stage3/.env"; do
+  if [ -f "$env_file" ]; then
+    set -a
+    source "$env_file"
+    set +a
+    break
+  fi
+done
+
+PROJ_ROOT="$(resolve_project_root)"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+
+PROFILE="${STAGE3_PROFILE:-slurm}"
+STUDY="${STAGE3_STUDY:-all}"
+OUTDIR="${STAGE3_OUTDIR:-${PROJ_ROOT}/analysis}"
+STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${PROJ_ROOT}/analysis}"
+STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${PROJ_ROOT}/analysis}"
+SLURM_PARTITION="${STAGE3_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
+WORKDIR="${STAGE3_WORKDIR:-${PROJ_ROOT}/pipeline_stage3/work}"
+CONDA_CACHE_DIR="${STAGE3_CONDA_CACHE_DIR:-${PROJ_ROOT}/pipeline_stage3/conda}"
+CONDA_SOLVER="${STAGE3_CONDA_SOLVER:-classic}"
+CONDA_CHANNEL_PRIORITY="${STAGE3_CONDA_CHANNEL_PRIORITY:-strict}"
+CACHE_MODE="${STAGE3_CACHE_MODE:-deep}"
+MIN_R2="${STAGE3_MIN_R2:-0.3}"
+MAF="${STAGE3_MAF:-0.01}"
+RUN_HWE="${STAGE3_RUN_HWE:-true}"
+HWE_P="${STAGE3_HWE_P:-0.000005}"
+HWE_K="${STAGE3_HWE_K:-0}"
+KING_CUTOFF="${STAGE3_KING_CUTOFF:-0.0884}"
+ANCESTRY_PC_COUNT="${STAGE3_ANCESTRY_PC_COUNT:-10}"
+ANCESTRY_Z_THRESHOLD="${STAGE3_ANCESTRY_Z_THRESHOLD:-6.0}"
+HET_SD_THRESHOLD="${STAGE3_HET_SD_THRESHOLD:-3.0}"
+EXCLUDE_ANCESTRY_OUTLIERS="${STAGE3_EXCLUDE_ANCESTRY_OUTLIERS:-false}"
+RESUME=1
+EXTRA_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile)
+      PROFILE="$2"
+      shift 2
+      ;;
+    --study)
+      STUDY="$2"
+      shift 2
+      ;;
+    --out|--outdir|-o)
+      OUTDIR="$2"
+      shift 2
+      ;;
+    --stage1-root)
+      STAGE1_ROOT="$2"
+      shift 2
+      ;;
+    --stage2-root)
+      STAGE2_ROOT="$2"
+      shift 2
+      ;;
+    --dbsnp-vcf)
+      STAGE3_DBSNP_VCF="$2"
+      shift 2
+      ;;
+    --dbsnp-tbi)
+      STAGE3_DBSNP_TBI="$2"
+      shift 2
+      ;;
+    --partition)
+      SLURM_PARTITION="$2"
+      shift 2
+      ;;
+    --min-r2)
+      MIN_R2="$2"
+      shift 2
+      ;;
+    --maf)
+      MAF="$2"
+      shift 2
+      ;;
+    --hwe-p)
+      HWE_P="$2"
+      shift 2
+      ;;
+    --no-hwe)
+      RUN_HWE="false"
+      shift
+      ;;
+    --exclude-ancestry-outliers)
+      EXCLUDE_ANCESTRY_OUTLIERS="true"
+      shift
+      ;;
+    --no-exclude-ancestry-outliers)
+      EXCLUDE_ANCESTRY_OUTLIERS="false"
+      shift
+      ;;
+    --no-resume)
+      RESUME=0
+      shift
+      ;;
+    -h|--help)
+      print_help
+      exit 0
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+PIPELINE_DIR="${PROJ_ROOT}/pipeline_stage3"
+PARAMS_FILE="${PIPELINE_DIR}/params.yaml"
+SUMMARY_SCRIPT="${PIPELINE_DIR}/bin/summary.py"
+SUMMARY_OUTPUT="${OUTDIR}/stage3-summary.md"
+NEXTFLOW_LOG="${PIPELINE_DIR}/.nextflow.log"
+
+OUTDIR="$(abs_path "${OUTDIR}")"
+STAGE1_ROOT="$(abs_path "${STAGE1_ROOT}")"
+STAGE2_ROOT="$(abs_path "${STAGE2_ROOT}")"
+WORKDIR="$(abs_path "${WORKDIR}")"
+CONDA_CACHE_DIR="$(abs_path "${CONDA_CACHE_DIR}")"
+SUMMARY_OUTPUT="$(abs_path "${SUMMARY_OUTPUT}")"
+NEXTFLOW_LOG="$(abs_path "${NEXTFLOW_LOG}")"
+
+DBSNP_VCF="$(resolve_dbsnp_vcf)"
+DBSNP_TBI="$(resolve_dbsnp_tbi "${DBSNP_VCF}")"
+
+export NXF_OPTS="${NXF_OPTS:- -Xms4g -Xmx24g}"
+export NXF_CONDA_CACHEDIR="${NXF_CONDA_CACHEDIR:-${CONDA_CACHE_DIR}}"
+export CONDA_SOLVER
+export CONDA_CHANNEL_PRIORITY
+export BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
+export PLINK_BIN="${PLINK_BIN:-plink}"
+export PLINK2_BIN="${PLINK2_BIN:-plink2}"
+export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
+
+source "$(conda info --base)/etc/profile.d/conda.sh" || true
+conda activate nf_EPIC-genetics || true
+unset R_HOME
+
+if command -v conda >/dev/null 2>&1; then
+  CONDA_BASE="$(conda info --base)"
+  export CONDA_BASE
+  export PATH="${CONDA_BASE}/bin:${CONDA_BASE}/condabin:${PATH}"
+fi
+
+if [ ! -d "${PIPELINE_DIR}" ]; then
+  echo "ERROR: Stage-3 pipeline directory not found: ${PIPELINE_DIR}" >&2
+  exit 1
+fi
+
+if [ ! -f "${PARAMS_FILE}" ]; then
+  echo "ERROR: Missing params file: ${PARAMS_FILE}" >&2
+  exit 1
+fi
+
+if [ ! -f "${SUMMARY_SCRIPT}" ]; then
+  echo "ERROR: Missing stage-3 summary script: ${SUMMARY_SCRIPT}" >&2
+  exit 1
+fi
+
+if [ ! -d "${STAGE1_ROOT}" ]; then
+  echo "ERROR: Stage-1 root not found: ${STAGE1_ROOT}" >&2
+  exit 1
+fi
+
+if [ ! -d "${STAGE2_ROOT}" ]; then
+  echo "ERROR: Stage-2 root not found: ${STAGE2_ROOT}" >&2
+  exit 1
+fi
+
+if [ ! -f "${DBSNP_VCF}" ]; then
+  echo "ERROR: dbSNP VCF not found: ${DBSNP_VCF}" >&2
+  exit 1
+fi
+
+if [ ! -f "${DBSNP_TBI}" ]; then
+  echo "ERROR: dbSNP VCF index not found: ${DBSNP_TBI}" >&2
+  exit 1
+fi
+
+if [ "${STUDY}" != "all" ]; then
+  IFS=',' read -r -a SELECTED_STUDIES <<< "${STUDY}"
+  for study_id in "${SELECTED_STUDIES[@]}"; do
+    study_id="$(echo "${study_id}" | xargs)"
+    if [ ! -d "${STAGE2_ROOT}/${study_id}/stage2" ]; then
+      echo "ERROR: Missing stage-2 directory for ${study_id}: ${STAGE2_ROOT}/${study_id}/stage2" >&2
+      exit 1
+    fi
+  done
+fi
+
+mkdir -p "${PROJ_ROOT}/src/logs" "${WORKDIR}" "${CONDA_CACHE_DIR}" "${PIPELINE_DIR}/.nextflow"
+cd "${PIPELINE_DIR}"
+
+echo "=========================================="
+echo " Running EPIC Genetics Stage-3 Pipeline"
+echo "=========================================="
+echo "Slurm job:                  ${SLURM_JOB_ID:-interactive}"
+echo "Host:                       $(hostname)"
+echo "Project root:               ${PROJ_ROOT}"
+echo "Pipeline:                   ${PIPELINE_DIR}"
+echo "Profile:                    ${PROFILE}"
+echo "Study:                      ${STUDY}"
+echo "Stage1 root:                ${STAGE1_ROOT}"
+echo "Stage2 root:                ${STAGE2_ROOT}"
+echo "Output root:                ${OUTDIR}"
+echo "dbSNP VCF:                  ${DBSNP_VCF}"
+echo "dbSNP TBI:                  ${DBSNP_TBI}"
+echo "Work dir:                   ${WORKDIR}"
+echo "Conda cache:                ${CONDA_CACHE_DIR}"
+echo "Min R2:                     ${MIN_R2}"
+echo "MAF:                        ${MAF}"
+echo "Run HWE:                    ${RUN_HWE}"
+echo "HWE p-value:                ${HWE_P}"
+echo "Exclude ancestry outliers:  ${EXCLUDE_ANCESTRY_OUTLIERS}"
+echo "Cache mode:                 ${CACHE_MODE}"
+echo "=========================================="
+
+nextflow_cmd=(
+  nextflow
+  -log "${NEXTFLOW_LOG}"
+  run .
+  -params-file "${PARAMS_FILE}"
+  -profile "${PROFILE}"
+  -work-dir "${WORKDIR}"
+  --outdir "${OUTDIR}"
+  --stage1_root "${STAGE1_ROOT}"
+  --stage2_root "${STAGE2_ROOT}"
+  --study "${STUDY}"
+  --dbsnp_vcf "${DBSNP_VCF}"
+  --dbsnp_tbi "${DBSNP_TBI}"
+  --slurm_partition "${SLURM_PARTITION}"
+  --cache_mode "${CACHE_MODE}"
+  --min_r2 "${MIN_R2}"
+  --maf "${MAF}"
+  --run_hwe "${RUN_HWE}"
+  --hwe_p "${HWE_P}"
+  --hwe_k "${HWE_K}"
+  --king_cutoff "${KING_CUTOFF}"
+  --ancestry_pc_count "${ANCESTRY_PC_COUNT}"
+  --ancestry_z_threshold "${ANCESTRY_Z_THRESHOLD}"
+  --het_sd_threshold "${HET_SD_THRESHOLD}"
+  --exclude_ancestry_outliers "${EXCLUDE_ANCESTRY_OUTLIERS}"
+)
+
+if [ "${RESUME}" = "1" ]; then
+  nextflow_cmd+=(-resume)
+fi
+
+if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
+  nextflow_cmd+=("${EXTRA_ARGS[@]}")
+fi
+
+"${nextflow_cmd[@]}"
+
+echo ""
+echo "Building stage-3 summary..."
+"${PYTHON3_BIN}" "${SUMMARY_SCRIPT}" \
+  --analysis-root "${OUTDIR}" \
+  --stage1-root "${STAGE1_ROOT}" \
+  --stage2-root "${STAGE2_ROOT}" \
+  --output "${SUMMARY_OUTPUT}"
+
+end_time=$(date +%s)
+elapsed=$((end_time - start_time))
+
+echo ""
+echo "Stage-3 pipeline complete."
+echo "Elapsed: ${elapsed} seconds"
+echo "Summary: ${SUMMARY_OUTPUT}"

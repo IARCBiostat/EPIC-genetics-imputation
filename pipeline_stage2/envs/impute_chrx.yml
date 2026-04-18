@@ -1,0 +1,9 @@
+name: impute-chrx
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - bcftools
+  - eagle2=2.4.1
+  - minimac4=4.1.6

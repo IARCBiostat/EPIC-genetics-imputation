@@ -1,0 +1,20 @@
+# Input bounds
+study: "all"
+stage1_root: "../analysis"
+slurm_partition: "low_p"
+
+# General BMRC Imputation Limits
+min_r2: 0.3
+minimac_batch_size: 900
+eagle_threads: 8
+minimac_threads: 8
+
+# References
+ref_1000g_dir: "../data/reference/1000G"
+fasta_ref: "../data/reference/1000G/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
+genetic_map_file: "../data/reference/eagle/genetic_map_hg38_withX.txt.gz"
+
+# Nextflow logic routing
+run_preprocessing: true
+run_phasing: true
+run_imputation: true

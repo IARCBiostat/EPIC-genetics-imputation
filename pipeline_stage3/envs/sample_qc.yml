@@ -1,0 +1,9 @@
+name: stage3-sample-qc
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - plink
+  - plink2

@@ -1,0 +1,20 @@
+outdir: ../analysis
+stage1_root: ../analysis
+stage2_root: ../analysis
+study: all
+dbsnp_vcf: ""
+dbsnp_tbi: ""
+cache_mode: deep
+slurm_partition: low_p
+
+min_r2: 0.3
+maf: 0.01
+run_hwe: true
+hwe_p: 0.000005
+hwe_k: 0
+
+king_cutoff: 0.0884
+het_sd_threshold: 3.0
+ancestry_pc_count: 10
+ancestry_z_threshold: 6.0
+exclude_ancestry_outliers: false

@@ -1,0 +1,7 @@
+name: stage3-finalize-study
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - plink2
