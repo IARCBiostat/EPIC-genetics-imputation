@@ -8,9 +8,9 @@ This repository contains the EPIC genetics imputation workflow. The workflow is 
 
 The active Slurm submission wrappers are:
 
-- `src/003_stage1.sh`
-- `src/004_stage2.sh`
-- `src/005_stage3.sh`
+- `src/004_stage1.sh`
+- `src/005_stage2.sh`
+- `src/006_stage3.sh`
 
 Stage-specific documentation lives in:
 
@@ -25,7 +25,7 @@ Stage-specific documentation lives in:
 - Main purpose: Convert each raw study into a harmonized hg38 PLINK handoff
 - Primary input:  Archive-style raw study PLINK data plus manifests and EPIC ID linkage files
 - Primary output: `analysis/<STUDY>/stage1/<STUDY>.bed/.bim/.fam`
-- Submission script: `src/003_stage1.sh` 
+- Submission script: `src/004_stage1.sh` 
 
 Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each study is processed with its own bespoke script because the original deliveries differ in array platform, allele coding, chromosome naming, manifest structure, and identifier linkage rules. All downstream matching is coordinate-based and assumes one common genome build. All downstream tools expect each study to exist as one standardized PLINK handoff.
 
@@ -50,11 +50,12 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 - Main purpose: Export stage-1 PLINK data to per-chromosome target VCFs, phase, and impute
 - Primary input:  `analysis/<STUDY>/stage1/` plus 1000G GRCh38 reference and Eagle map
 - Primary output: `analysis/<STUDY>/stage2/<STUDY>_chr*_GxS.imputed.vcf.gz`
-- Submission script: `src/004_stage2.sh` 
+- Submission script: `src/005_stage2.sh` 
 
 #### What this stage does:
 - performs phasing
 - performs imputation
+- generates per-study imputation reports and a cohort summary
 
 ### Phasing
 
@@ -82,7 +83,7 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 ### Imputation
 
-Imputation](https://en.wikipedia.org/wiki/Genotype_imputation) statistically infers [genotypes](https://en.wikipedia.org/wiki/Imputation_(genetics)) at variants that were not directly typed on the original array.
+[Imputation](https://en.wikipedia.org/wiki/Genotype_imputation) statistically infers [genotypes](https://en.wikipedia.org/wiki/Imputation_(genetics)) at variants that were not directly typed on the original array.
 
 #### Why:
 
@@ -109,17 +110,18 @@ Imputation](https://en.wikipedia.org/wiki/Genotype_imputation) statistically inf
 - Directory: `pipeline_stage3/`
 - Main purpose: Annotate rsIDs, filter imputed variants, convert to PLINK2, and perform sample QC
 - Primary input: `analysis/<STUDY>/stage2/` plus [dbSNP](https://en.wikipedia.org/wiki/DbSNP) GRCh38
-- Primary output: `analysis/<STUDY>/stage3/<STUDY>.pgen/.pvar/.psam`
-- Submission script: `src/005_stage3.sh`
+- Primary output: `analysis/<STUDY>/stage3/final/<STUDY>.pgen/.pvar/.psam`
+- Submission script: `src/006_stage3.sh`
 
 #### What this stage does:
 
-Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-ready study-level PLINK2 dataset. It combines four linked operations into one workflow:
+Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-ready study-level PLINK2 dataset. It combines five linked operations into one workflow:
 
 1. variant identifier standardization
-2. variant-level QC
+2. variant-level QC (including HWE)
 3. conversion to PLINK2 format
-4. sample-level QC and final sample exclusion
+4. sample-level QC (Ancestry, Relatedness, Heterozygosity)
+5. **Master Reporting**: Consolidated study dashboards aggregating Stages 1-3.
 
 #### Why:
 
@@ -140,13 +142,13 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-r
 - the filtered chromosome-level imputed VCFs are converted into PLINK2 `pgen/pvar/psam` files and merged into one study-level dataset
 - the merged study-level dataset is then used for sample QC
 - sample QC updates sex from the stage-1 `.fam`, estimates relatedness with KING, identifies [heterozygosity](https://en.wikipedia.org/wiki/Heterozygosity) outliers, performs sex checks, and runs [PCA](https://en.wikipedia.org/wiki/Principal_component_analysis)-based ancestry QC
-- a final sample-removal list is built from the required QC exclusions and, optionally, ancestry outliers
-- ancestry outliers are always identified
-	- ancestry outliers are excluded only when the stage-3 exclusion flag is enabled
+- a final sample-removal list is built from the required QC exclusions and ancestry outliers
+- ancestry outliers are identified and excluded by default in the final dataset
+- a consolidated **Master Report** is generated for every study, including ancestry projection plots.
 
 #### Data used:
 
-- stage-2 imputed VCFs
+- stage-2 imputed VCFs and consolidated metrics
 - [dbSNP](https://en.wikipedia.org/wiki/DbSNP) GRCh38
 	- dbSNP provides rsIDs where a known GRCh38 variant match exists
 - the stage-1 `.fam` file as the authoritative recorded-sex source
@@ -160,7 +162,8 @@ Repository-level outputs are organized as:
 
 - `analysis/<STUDY>/stage1/`
 - `analysis/<STUDY>/stage2/`
-- `analysis/<STUDY>/stage3/`
+- `analysis/<STUDY>/stage3/final/`
+- `analysis/<STUDY>/stage3/report/`
 - `analysis/stage1-summary.md`
 - `analysis/stage2-summary.md`
 - `analysis/stage3-summary.md`
@@ -186,29 +189,29 @@ Run Stages Sequentially
 Full run:
 
 ```bash
-sbatch src/003_stage1.sh
-sbatch src/004_stage2.sh
-sbatch src/005_stage3.sh
+sbatch src/004_stage1.sh
+sbatch src/005_stage2.sh
+sbatch src/006_stage3.sh
 ```
 
-To exclude ancestry outliers during stage 3 finalization:
+To exclude ancestry outliers during stage 3 finalization (now enabled by default):
 
 ```bash
-sbatch src/005_stage3.sh --exclude-ancestry-outliers
+sbatch src/006_stage3.sh
 ```
 
 
 Test/Single study:
 
 ```bash
-STAGE1_SCRIPTS=process_brea_01_erneg.py sbatch src/003_stage1.sh
-sbatch src/004_stage2.sh --study Brea_01_Erneg
-sbatch src/005_stage3.sh --study Brea_01_Erneg
+STAGE1_SCRIPTS=process_brea_01_erneg.py sbatch src/004_stage1.sh
+sbatch src/005_stage2.sh --study Brea_01_Erneg
+sbatch src/006_stage3.sh --study Brea_01_Erneg
 ```
 To exclude ancestry outliers during stage 3 finalization:
 
 ```bash
-sbatch src/005_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
+sbatch src/006_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
 ```
 
 ## Methods And Thresholds Summary
@@ -251,63 +254,33 @@ sbatch src/005_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
 | Sample QC: ancestry exclusion | Ancestry outliers may optionally be excluded from the final dataset | `exclude_ancestry_outliers = false` by default | Outliers are only removed when the exclusion flag is enabled |
 | Sample QC: sex update and sex check | Recorded sex is updated from the stage-1 `.fam`, then genotype-derived sex is checked | No separate numeric threshold exposed in params | Sex mismatches are always added to the removal list |
 
-## Study Overview Table
+## Summary Table
 
-`XXX` indicates a value that will be populated from the stage-2 or stage-3 summaries after those summaries are regenerated. Raw-study counts are also currently left as `XXX` because there is not yet a consolidated raw-data summary file in the repository.
+The table below provides a consolidated overview of sample and variant counts along with core imputation quality metrics.
 
-| Study | N raw samples | N raw variants | N stage 1 samples | N stage 1 variants | N stage 2 samples | N stage 2 variants | N stage 3 samples | N stage 3 variants |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `Brea_01_Erneg` | XXX | XXX | 1,011 | 558,570 | XXX | XXX | XXX | XXX |
-| `Brea_02` | XXX | XXX | 7,491 | 478,002 | XXX | XXX | XXX | XXX |
-| `Clrt_01` | XXX | XXX | - | - | XXX | XXX | XXX | XXX |
-| `Ecvd_01` | XXX | XXX | 9,426 | 531,696 | XXX | XXX | XXX | XXX |
-| `Ecvd_02` | XXX | XXX | 8,920 | 208,221 | XXX | XXX | XXX | XXX |
-| `Ecvd_03` | XXX | XXX | 8,587 | 395,482 | XXX | XXX | XXX | XXX |
-| `Glbd_01` | XXX | XXX | 119 | 689,010 | XXX | XXX | XXX | XXX |
-| `Inte_01` | XXX | XXX | 9,290 | 566,795 | XXX | XXX | XXX | XXX |
-| `Inte_02` | XXX | XXX | 7,397 | 516,117 | XXX | XXX | XXX | XXX |
-| `Inte_03` | XXX | XXX | 6,328 | 509,114 | XXX | XXX | XXX | XXX |
-| `Kidn_01` | XXX | XXX | 356 | 580,897 | XXX | XXX | XXX | XXX |
-| `Kidn_02` | XXX | XXX | 265 | 4,146,971 | XXX | XXX | XXX | XXX |
-| `Lung_01` | XXX | XXX | 2,484 | 492,643 | XXX | XXX | XXX | XXX |
-| `Lymp_01` | XXX | XXX | 480 | 732,277 | XXX | XXX | XXX | XXX |
-| `Ovar_01` | XXX | XXX | 1,310 | 470,489 | XXX | XXX | XXX | XXX |
-| `Panc_01` | XXX | XXX | 751 | 559,366 | XXX | XXX | XXX | XXX |
-| `Panc_02` | XXX | XXX | 183 | 732,277 | XXX | XXX | XXX | XXX |
-| `Pros_01` | XXX | XXX | 856 | 567,416 | XXX | XXX | XXX | XXX |
-| `Pros_02` | XXX | XXX | 1,801 | 201,475 | XXX | XXX | XXX | XXX |
-| `Pros_03` | XXX | XXX | 1,137 | 496,063 | XXX | XXX | XXX | XXX |
-| `Pros_04` | XXX | XXX | 1,488 | 669,060 | XXX | XXX | XXX | XXX |
-| `Stom_01` | XXX | XXX | 317 | 654,004 | XXX | XXX | XXX | XXX |
-| `Uadt_01` | XXX | XXX | 213 | 492,514 | XXX | XXX | XXX | XXX |
-
-## Metrics Table
-
-This table mirrors the intended content of `analysis/stage3-summary.md`. For now it remains a scaffold and should be filled from the regenerated stage-3 summary once stage 3 has completed.
-
-| Study | Variants In | Post R2/MAF | Post HWE | Final Variants | rsID | Fallback ID | Sex Mismatch | Related Removed | Het Outliers | Ancestry Identified | Ancestry Removed | Total Removed |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `Brea_01_Erneg` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Brea_02` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Clrt_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Ecvd_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Ecvd_02` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Ecvd_03` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Glbd_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Inte_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Inte_02` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Inte_03` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Kidn_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Kidn_02` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Lung_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Lymp_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Ovar_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Panc_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Panc_02` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Pros_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Pros_02` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Pros_03` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Pros_04` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Stom_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| `Uadt_01` | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
+| STUDY | N | variants | ER2 | R2 | AF R2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Brea_01_Erneg` | XXX | XXX | XXX | XXX | XXX |
+| `Brea_02` | XXX | XXX | XXX | XXX | XXX |
+| `Clrt_01` | XXX | XXX | XXX | XXX | XXX |
+| `Ecvd_01` | XXX | XXX | XXX | XXX | XXX |
+| `Ecvd_02` | XXX | XXX | XXX | XXX | XXX |
+| `Ecvd_03` | XXX | XXX | XXX | XXX | XXX |
+| `Glbd_01` | XXX | XXX | XXX | XXX | XXX |
+| `Inte_01` | XXX | XXX | XXX | XXX | XXX |
+| `Inte_02` | XXX | XXX | XXX | XXX | XXX |
+| `Inte_03` | XXX | XXX | XXX | XXX | XXX |
+| `Kidn_01` | XXX | XXX | XXX | XXX | XXX |
+| `Kidn_02` | XXX | XXX | XXX | XXX | XXX |
+| `Lung_01` | XXX | XXX | XXX | XXX | XXX |
+| `Lymp_01` | XXX | XXX | XXX | XXX | XXX |
+| `Ovar_01` | XXX | XXX | XXX | XXX | XXX |
+| `Panc_01` | XXX | XXX | XXX | XXX | XXX |
+| `Panc_02` | XXX | XXX | XXX | XXX | XXX |
+| `Pros_01` | XXX | XXX | XXX | XXX | XXX |
+| `Pros_02` | XXX | XXX | XXX | XXX | XXX |
+| `Pros_03` | XXX | XXX | XXX | XXX | XXX |
+| `Pros_04` | XXX | XXX | XXX | XXX | XXX |
+| `Stom_01` | XXX | XXX | XXX | XXX | XXX |
+| `Uadt_01` | XXX | XXX | XXX | XXX | XXX |
 

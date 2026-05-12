@@ -30,18 +30,15 @@ Stage 2 ends with:
 Full run:
 
 ```bash
-sbatch src/004_stage2.sh
+sbatch src/005_stage2.sh
 ```
 
 Single study:
 
 ```bash
-sbatch src/004_stage2.sh --study Brea_01_Erneg
+sbatch src/005_stage2.sh --study Brea_01_Erneg
 ```
 
-Stage-2 summary output:
-
-- `analysis/stage2-summary.md`
 
 ## 3. Ordered Execution Inside Stage 2
 
@@ -160,65 +157,3 @@ The chrX pipeline:
 
 If a study has no chrX at all in stage 1, then chrX is absent from stage 2 by design and is not treated as an error.
 
-### 3.8 Step 8: Publish Outputs And Regenerate The Summary
-
-The stage-2 wrapper writes:
-
-- study outputs under `analysis/<STUDY>/stage2/`
-- run metadata under `analysis/stage2-pipeline_info/`
-- the stage-2 summary under `analysis/stage2-summary.md`
-
-## 4. Output Conventions
-
-### 4.1 Final Outputs
-
-The final stage-2 files are per-chromosome imputed VCFs:
-
-- `<STUDY>_chr1_GxS.imputed.vcf.gz`
-- `...`
-- `<STUDY>_chr22_GxS.imputed.vcf.gz`
-- `<STUDY>_chrX_GxS.imputed.vcf.gz` when applicable
-
-### 4.2 ID Style
-
-The stage-2 pipeline is designed to use coordinate-style IDs:
-
-- `chr:pos:REF:ALT`
-
-This is intentional and stabilizes variant identity before stage 3 rsID annotation.
-
-### 4.3 Temporary Files
-
-All temporary Nextflow work directories are placed under:
-
-- `pipeline_stage2/work/`
-
-## 5. Stage-2 Summary Table Placeholder
-
-Replace `XXX` with the generated values from `analysis/stage2-summary.md` once stage 2 has completed.
-
-| Study | Stage1 Samples | Stage2 Samples | Sample Match | ID Style | Qual Tag | Variants | >= 0.3 | >= 0.8 | Mean Qual | Chr Files | Indexed | Size GiB |
-| --- | ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Brea_01_Erneg | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Brea_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Clrt_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Glbd_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Kidn_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Kidn_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Lung_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Lymp_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ovar_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Panc_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Panc_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_04 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Stom_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Uadt_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |

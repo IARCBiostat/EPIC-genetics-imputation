@@ -283,39 +283,3 @@ This table summarizes the study-specific configuration actually encoded in the b
 | Stom_01 | 36 | Study link file | None | `neg=exclude_TB`, `chrpos=move`, `alleles=exclude` | `chr=move`, `pos=search`, `strand=flip_tb_pm`, `alleles=move` | None |
 | Uadt_01 | 37 | EPIC master only | `ab_translate`, `ab_txt_rel` | `neg=move`, `chrpos=exclude`, `alleles=move_all` | `chr=move`, `pos=move`, `strand=flip_pm`, `alleles=search` | None |
 
-## 7. Current Stage-1 Summary Snapshot
-
-The table below mirrors the current `analysis/stage1-summary.md` summary snapshot.
-
-### 7.1 Complete Studies
-
-| Study | Samples | Variants | Sex 1 | Sex 2 | Sex Other | Pheno 1 | Pheno 2 | Pheno Other |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Brea_01_Erneg | 1,011 | 558,570 | 0 | 1,011 | 0 | 0 | 0 | 1,011 |
-| Brea_02 | 7,491 | 478,002 | 0 | 7,491 | 0 | 0 | 0 | 7,491 |
-| Ecvd_01 | 9,426 | 531,696 | 5,386 | 4,040 | 0 | 0 | 0 | 9,426 |
-| Ecvd_02 | 8,920 | 208,221 | 5,179 | 3,741 | 0 | 0 | 0 | 8,920 |
-| Ecvd_03 | 8,587 | 395,482 | 5,037 | 3,550 | 0 | 0 | 0 | 8,587 |
-| Glbd_01 | 119 | 689,010 | 25 | 94 | 0 | 0 | 0 | 119 |
-| Inte_01 | 9,290 | 566,795 | 3,902 | 5,388 | 0 | 0 | 0 | 9,290 |
-| Inte_02 | 7,397 | 516,117 | 2,946 | 4,451 | 0 | 0 | 0 | 7,397 |
-| Inte_03 | 6,328 | 509,114 | 3,153 | 3,175 | 0 | 0 | 0 | 6,328 |
-| Kidn_01 | 356 | 580,897 | 195 | 161 | 0 | 0 | 0 | 356 |
-| Kidn_02 | 265 | 4,146,971 | 144 | 121 | 0 | 0 | 0 | 265 |
-| Lung_01 | 2,484 | 492,643 | 1,549 | 935 | 0 | 0 | 0 | 2,484 |
-| Lymp_01 | 480 | 732,277 | 224 | 256 | 0 | 0 | 0 | 480 |
-| Ovar_01 | 1,310 | 470,489 | 0 | 1,310 | 0 | 0 | 0 | 1,310 |
-| Panc_01 | 751 | 559,366 | 380 | 371 | 0 | 0 | 0 | 751 |
-| Panc_02 | 183 | 732,277 | 71 | 112 | 0 | 0 | 0 | 183 |
-| Pros_01 | 856 | 567,416 | 856 | 0 | 0 | 0 | 0 | 856 |
-| Pros_02 | 1,801 | 201,475 | 1,801 | 0 | 0 | 0 | 0 | 1,801 |
-| Pros_03 | 1,137 | 496,063 | 1,137 | 0 | 0 | 0 | 0 | 1,137 |
-| Pros_04 | 1,488 | 669,060 | 1,488 | 0 | 0 | 0 | 0 | 1,488 |
-| Stom_01 | 317 | 654,004 | 176 | 141 | 0 | 0 | 0 | 317 |
-| Uadt_01 | 213 | 492,514 | 120 | 93 | 0 | 0 | 0 | 213 |
-
-### 7.2 Incomplete Or Missing Studies
-
-| Study | Status | Samples | Variants |
-| --- | --- | ---: | ---: |
-| Clrt_01 | bed-missing, bim-missing, fam-missing, summary-missing | - | - |

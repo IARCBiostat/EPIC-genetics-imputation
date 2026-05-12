@@ -7,44 +7,28 @@ This stage consumes stage-2 imputed VCFs from `analysis/<STUDY>/stage2/`, annota
 ## 1. Stage 3 Scope
 
 Stage 3 inputs are:
-
-- `analysis/<STUDY>/stage2/<STUDY>_chr*_GxS.imputed.vcf.gz`
-- `analysis/<STUDY>/stage1/<STUDY>.fam`
+- `analysis/<STUDY>/stage2/` (Imputed VCFs + metrics)
+- `analysis/<STUDY>/stage1/` (Original FAM files)
 - dbSNP GRCh38 VCF + index
 
-Stage 3 outputs are:
+Stage 3 produces a finalized, analysis-ready dataset and a consolidated **Master Report** aggregating metadata from all three stages of the pipeline.
 
-- `analysis/<STUDY>/stage3/<STUDY>.pgen`
-- `analysis/<STUDY>/stage3/<STUDY>.pvar`
-- `analysis/<STUDY>/stage3/<STUDY>.psam`
-
-QC outputs are written beneath:
-
-- `analysis/<STUDY>/stage3/qc/variant_qc/`
-- `analysis/<STUDY>/stage3/qc/sample_qc/`
-
-The stage-3 repository summary is:
-
-- `analysis/stage3-summary.md`
+Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
+- **`final/`**: The definitive, QC-passed PLINK2 files.
+- **`prep_chrom/`**: Intermediate per-chromosome PLINK2 files.
+- **`sample_review/`**: All sample-level QC artifacts (PCA, KING, Het, Sexcheck).
+- **`report/`**: Consolidated dashboards, tables, and figures.
 
 ## 2. How To Run Stage 3
 
-Full run:
-
+Full run (HWE and Ancestry Exclusion are ENABLED by default):
 ```bash
-sbatch src/005_stage3.sh
+sbatch src/006_stage3.sh
 ```
 
-Single study:
-
+To run a specific study:
 ```bash
-sbatch src/005_stage3.sh --study Brea_01_Erneg
-```
-
-To exclude ancestry outliers from the final dataset:
-
-```bash
-sbatch src/005_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
+sbatch src/006_stage3.sh --study Glbd_01
 ```
 
 ## 3. Ordered Execution Inside Stage 3
@@ -256,68 +240,38 @@ The final published outputs are:
 - `analysis/<STUDY>/stage3/<STUDY>.pvar`
 - `analysis/<STUDY>/stage3/<STUDY>.psam`
 
-## 4. Stage-3 Output Structure
+## 4. Master Reporting System
 
-### 4.1 Final Files
+Stage 3 introduces the **Master Report** (`master_report.py`), which provides a unified view of the entire genetics processing history for each study.
 
-The main analysis-ready output is a study-level PLINK2 dataset:
+### 4.1 Data Lineage
+The report tracks sample and variant counts from:
+- **Stage 1**: Raw data harmonization and liftover.
+- **Stage 2**: Imputation performance and variant density.
+- **Stage 3**: Final variant filtering (HWE) and sample QC.
 
-- `<STUDY>.pgen`
-- `<STUDY>.pvar`
-- `<STUDY>.psam`
+### 4.2 Visualizations
+- **Ancestry Projection**: PC1 vs PC2 plot identifying ancestry outliers.
+- **Imputation Metrics**: Distribution of R2 scores across chromosomes.
+- **QC Metrics**: Heterozygosity and kinship distributions.
 
-### 4.2 Variant QC Files
+## 5. Output Conventions
 
-Variant-level QC artefacts are written under:
+### 5.1 Final Dataset (`final/`)
+- `<STUDY>.pgen`, `<STUDY>.pvar`, `<STUDY>.psam`
 
-- `analysis/<STUDY>/stage3/qc/variant_qc/`
+### 5.2 Intermediate Process Assets
+- **`prep_chrom/`**: Per-chromosome PGENs after R2/MAF/HWE filtering.
+- **`sample_review/`**:
+    - `*.eigenvec` / `*.eigenval`: PCA results.
+    - `*.king.kin0`: Kinship coefficients.
+    - `*.het`: Heterozygosity statistics.
+    - `*.sexcheck`: PLINK sex concordance results.
 
-These include:
+### 5.3 Reporting Assets (`report/`)
+- **`report-master.html`**: The unified study dashboard.
+- **`figures/`**: Ancestry PCA plots and QC distributions.
+- **`tables/`**: Consolidated variant and sample metric TSVs.
+- **`flags/`**: Lists of samples flagged for sex mismatches, relatedness, or ancestry.
+- **`manifests/`**: Final variant ID mappings and sample removal lists.
 
-- `*.variant_qc.tsv`
-- `*.variant_id_map.tsv.gz`
-
-### 4.3 Sample QC Files
-
-Sample-level QC artefacts are written under:
-
-- `analysis/<STUDY>/stage3/qc/sample_qc/`
-
-These include:
-
-- sex check outputs
-- KING outputs
-- heterozygosity outputs
-- PCA outputs
-- outlier ID lists
-- sample-level QC summary tables
-
-## 5. Stage-3 Summary Table Placeholder
-
-Replace `XXX` with the generated values from `analysis/stage3-summary.md` once stage 3 has completed.
-
-| Study | Stage1 Samples | Stage3 Samples | Variants In | Post R2/MAF | Post HWE | Final Variants | rsID | Fallback ID | Sex | Related | Het | Ancestry ID | Ancestry Removed | Total Removed |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Brea_01_Erneg | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Brea_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Clrt_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Glbd_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Kidn_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Kidn_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Lung_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Lymp_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ovar_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Panc_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Panc_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_04 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Stom_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Uadt_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
