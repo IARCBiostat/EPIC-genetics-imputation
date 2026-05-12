@@ -2,7 +2,7 @@
 
 Stage 3 performs post-imputation QC and converts the final study outputs into PLINK2 format.
 
-This stage consumes stage-2 imputed VCFs from `analysis/<STUDY>/stage2/`, annotates rsIDs from dbSNP GRCh38, filters variants, merges chromosomes, performs sample QC, and writes the final study-level PLINK2 dataset to `analysis/<STUDY>/stage3/`.
+This stage consumes stage-2 imputed VCFs from `analysis/<STUDY>/stage2/`, annotates rsIDs from dbSNP GRCh38, filters variants, merges chromosomes, performs sample QC, and writes the final study-level PLINK2 dataset to `analysis/<STUDY>/stage3/final/`.
 
 ## 1. Stage 3 Scope
 
@@ -11,7 +11,7 @@ Stage 3 inputs are:
 - `analysis/<STUDY>/stage1/` (Original FAM files)
 - dbSNP GRCh38 VCF + index
 
-Stage 3 produces a finalized, analysis-ready dataset and a consolidated **Master Report** aggregating metadata from all three stages of the pipeline.
+Stage 3 produces a finalized, analysis-ready dataset and a Stage 3-only report. Cross-stage master reports are generated separately with `src/007_report.sh`.
 
 Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
 - **`final/`**: The definitive, QC-passed PLINK2 files.
@@ -37,7 +37,7 @@ Stage 3 is defined in `pipeline_stage3/main.nf` and uses four active modules:
 
 - `prepare_dbsnp.nf`
 - `prepare_chrom.nf`
-- `sample_qc.nf`
+- `sample_review.nf`
 - `finalize_study.nf`
 
 ### 3.1 Step 1: Prepare dbSNP Per Chromosome
@@ -150,7 +150,7 @@ The per-chromosome variant QC table records:
 
 ### 3.8 Step 8: Merge All Chromosomes Per Study
 
-`SAMPLE_QC` begins by merging the chromosome-level PLINK2 files into one study-level dataset:
+`SAMPLE_REVIEW` begins by merging the chromosome-level PLINK2 files into one study-level dataset:
 
 - `<STUDY>_allchr.pgen`
 - `<STUDY>_allchr.pvar`
@@ -182,7 +182,7 @@ These are used because some sample-QC procedures are whole-genome and others are
 
 ### 3.11 Step 11: Run Sample QC
 
-`SAMPLE_QC` performs four sample-QC procedures:
+`SAMPLE_REVIEW` performs four sample-QC procedures:
 
 1. sex check
 2. relatedness estimation / KING table
@@ -236,24 +236,26 @@ If the removal list is non-empty, the study is rewritten after `--remove`.
 
 The final published outputs are:
 
-- `analysis/<STUDY>/stage3/<STUDY>.pgen`
-- `analysis/<STUDY>/stage3/<STUDY>.pvar`
-- `analysis/<STUDY>/stage3/<STUDY>.psam`
+- `analysis/<STUDY>/stage3/final/<STUDY>.pgen`
+- `analysis/<STUDY>/stage3/final/<STUDY>.pvar`
+- `analysis/<STUDY>/stage3/final/<STUDY>.psam`
 
-## 4. Master Reporting System
+## 4. Stage 3 Reporting
 
-Stage 3 introduces the **Master Report** (`master_report.py`), which provides a unified view of the entire genetics processing history for each study.
+Stage 3 creates a Stage 3-only report at `analysis/<STUDY>/stage3/report/report-stage3.html`.
+This report covers post-imputation filtering and sample review only.
+Cross-stage master reports are generated separately with `src/007_report.sh`.
 
-### 4.1 Data Lineage
-The report tracks sample and variant counts from:
-- **Stage 1**: Raw data harmonization and liftover.
-- **Stage 2**: Imputation performance and variant density.
-- **Stage 3**: Final variant filtering (HWE) and sample QC.
+### 4.1 Report Contents
+The Stage 3 report tracks:
+- Variant ID annotation and fallback ID counts.
+- R2/MAF variant filtering counts.
+- HWE variant filtering counts.
+- Sex, relatedness, heterozygosity, and ancestry sample-review counts.
 
 ### 4.2 Visualizations
+- **Filtering Counts**: Variant and sample counts before and after Stage 3 filtering.
 - **Ancestry Projection**: PC1 vs PC2 plot identifying ancestry outliers.
-- **Imputation Metrics**: Distribution of R2 scores across chromosomes.
-- **QC Metrics**: Heterozygosity and kinship distributions.
 
 ## 5. Output Conventions
 
@@ -269,9 +271,8 @@ The report tracks sample and variant counts from:
     - `*.sexcheck`: PLINK sex concordance results.
 
 ### 5.3 Reporting Assets (`report/`)
-- **`report-master.html`**: The unified study dashboard.
+- **`report-stage3.html`**: The Stage 3-only study dashboard.
 - **`figures/`**: Ancestry PCA plots and QC distributions.
 - **`tables/`**: Consolidated variant and sample metric TSVs.
 - **`flags/`**: Lists of samples flagged for sex mismatches, relatedness, or ancestry.
 - **`manifests/`**: Final variant ID mappings and sample removal lists.
-

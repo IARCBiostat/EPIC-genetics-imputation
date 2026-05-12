@@ -1,4 +1,4 @@
-name: stage3-sample-qc
+name: stage3-sample-review
 channels:
   - conda-forge
   - bioconda

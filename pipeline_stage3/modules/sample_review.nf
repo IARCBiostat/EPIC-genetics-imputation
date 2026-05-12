@@ -1,15 +1,35 @@
-process SAMPLE_QC {
+process SAMPLE_REVIEW {
     tag "${study_name}"
-    cpus 2
-    memory '24 GB'
-    publishDir "${params.outdir}/${study_name}/stage3/qc/sample_qc", mode: 'copy', pattern: "${study_name}.*", overwrite: true
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        if (filename.endsWith('.sample_review.tsv')) {
+            return "${study_name}/stage3/report/tables/${filename}"
+        }
+        if (filename.endsWith('.id')) {
+             if (filename.contains('.samples_to_remove.')) {
+                 return "${study_name}/stage3/report/manifests/${filename}"
+             }
+             return "${study_name}/stage3/report/flags/${filename}"
+        }
+        if (filename.endsWith('.eigenvec') || filename.endsWith('.eigenval') || 
+            filename.endsWith('.king.kin0') || filename.endsWith('.sexcheck') || 
+            filename.endsWith('.het') || filename.endsWith('.log')) {
+            return "${study_name}/stage3/sample_review/${filename}"
+        }
+        if (filename.endsWith('.pgen') || filename.endsWith('.pvar') || filename.endsWith('.psam')) {
+             return "${study_name}/stage3/sample_review/${filename}"
+        }
+        if (filename.endsWith('.bed') || filename.endsWith('.bim') || filename.endsWith('.fam')) {
+             return "${study_name}/stage3/sample_review/${filename}"
+        }
+        null
+    }
 
     input:
     tuple val(study_name), val(chroms), path(pgens), path(pvars), path(psams), path(variant_stats), path(id_maps), path(stage1_fam)
 
     output:
-    tuple val(study_name), path("${study_name}_allchr_sex.pgen"), path("${study_name}_allchr_sex.pvar"), path("${study_name}_allchr_sex.psam"), path("${study_name}.samples_to_remove.id"), path("${study_name}.sample_qc.tsv"), emit: finalize_input
-    path("${study_name}.*"), emit: qc_files
+    tuple val(study_name), path("${study_name}_allchr_sex.pgen"), path("${study_name}_allchr_sex.pvar"), path("${study_name}_allchr_sex.psam"), path("${study_name}.samples_to_remove.id"), path("${study_name}.sample_review.tsv"), emit: finalize_input
+    path("${study_name}*"), emit: review_files
 
     script:
     def chrom_list = chroms.collect { it.toString() }.join(' ')
@@ -105,6 +125,6 @@ process SAMPLE_QC {
       printf "study\\tpre_final_samples\\tsex_mismatch\\trelated_removed\\theterozygosity_outliers\\tancestry_outliers_identified\\tancestry_outliers_removed\\ttotal_removed\\n"
       printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" \\
         "${study_name}" "\${PRE_FINAL_SAMPLES}" "\${SEX_MISMATCH_COUNT}" "\${RELATED_COUNT}" "\${HET_COUNT}" "\${ANCESTRY_IDENTIFIED_COUNT}" "\${ANCESTRY_REMOVED_COUNT}" "\${TOTAL_REMOVED_COUNT}"
-    } > ${study_name}.sample_qc.tsv
+    } > ${study_name}.sample_review.tsv
     """
 }

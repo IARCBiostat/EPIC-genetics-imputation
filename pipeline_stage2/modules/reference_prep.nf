@@ -2,8 +2,9 @@
 
 process PREP_REFERENCE {
     tag "chr${chr}"
-    cpus 2
-    memory '16 GB'
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        "cohort/stage2/reference/${filename}"
+    }
 
     input:
     val chr

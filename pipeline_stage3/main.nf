@@ -3,7 +3,7 @@ nextflow.enable.dsl = 2
 
 include { PREP_DBSNP_CHROM } from './modules/prepare_dbsnp.nf'
 include { PREP_CHROM } from './modules/prepare_chrom.nf'
-include { SAMPLE_QC } from './modules/sample_qc.nf'
+include { SAMPLE_REVIEW } from './modules/sample_review.nf'
 include { FINALIZE_STUDY } from './modules/finalize_study.nf'
 
 def chromSortKey(String chrom) {
@@ -14,6 +14,7 @@ workflow {
 
     def included_studies = params.study == 'all' ? [] : params.study.split(',').collect { it.trim() }
     def all_chroms = (1..22).collect { it.toString() } + ['X']
+    def expected_chrom_count = all_chroms.size()
 
     ch_chroms = Channel.fromList(all_chroms)
 
@@ -39,18 +40,19 @@ workflow {
 
     ch_prep_input = ch_stage2
         .map { study, chr, vcf, tbi -> tuple(chr, study, vcf, tbi) }
-        .join(ch_dbsnp_chr)
+        // Fan out each per-chromosome dbSNP reference to every study VCF on that chromosome.
+        .combine(ch_dbsnp_chr, by: 0)
         .map { chr, study, vcf, tbi, dbsnp_vcf, dbsnp_tbi ->
             tuple(study, chr, vcf, tbi, dbsnp_vcf, dbsnp_tbi)
         }
 
-    ch_chrom_qc = PREP_CHROM(ch_prep_input)
+    ch_chrom_review = PREP_CHROM(ch_prep_input)
 
-    ch_sample_qc_input = ch_chrom_qc
+    ch_sample_review_input = ch_chrom_review
         .map { study, chr, pgen, pvar, psam, stats, id_map ->
             tuple(study, [chr: chr, pgen: pgen, pvar: pvar, psam: psam, stats: stats, id_map: id_map])
         }
-        .groupTuple()
+        .groupTuple(size: expected_chrom_count)
         .map { study, entries ->
             def ordered = entries.sort { a, b ->
                 chromSortKey(a.chr as String) <=> chromSortKey(b.chr as String)
@@ -70,7 +72,7 @@ workflow {
             tuple(study, chroms, pgens, pvars, psams, stats, id_maps, fam)
         }
 
-    ch_study_qc = SAMPLE_QC(ch_sample_qc_input)
+    ch_study_review = SAMPLE_REVIEW(ch_sample_review_input)
 
-    FINALIZE_STUDY(ch_study_qc.finalize_input)
+    FINALIZE_STUDY(ch_study_review.finalize_input)
 }

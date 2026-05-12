@@ -2,7 +2,7 @@
 
 Stage 1 converts each raw EPIC genetics dataset into a harmonized hg38 PLINK handoff ready for stage 2.
 
-This stage is implemented as one bespoke script per study in `pipeline_stage1/scripts/`. The archived 2022 scripts in `temp/archive/pipeline-2022/` are used only as templates and references; they are not called directly by the active stage-1 workflow.
+The stage-1 workflow standardizes all studies into a common coordinate system and genome build.
 
 ## 1. Stage 1 Scope
 
@@ -56,13 +56,13 @@ The stage-1 scripts do not operate directly on the flattened sync layout in `dat
 The normal batch entrypoint is:
 
 ```bash
-sbatch src/003_stage1.sh
+sbatch src/004_stage1.sh
 ```
 
 To run a single study:
 
 ```bash
-STAGE1_SCRIPTS=process_brea_01_erneg.py sbatch src/003_stage1.sh
+STAGE1_SCRIPTS=process_brea_01_erneg.py sbatch src/004_stage1.sh
 ```
 
 To run one study script directly:
@@ -252,34 +252,4 @@ The stage-1 scripts encode all study-specific logic in the configuration block a
 | `PART1` | Study-specific Part 1 SNP exclusion behavior |
 | `COMPLETION` | Study-specific metadata completion behavior |
 | `PART2_BUILD35_REL` | Optional extra build-35 exclusion list applied in Part 2 |
-
-## 6. Study-Specific Matrix
-
-This table summarizes the study-specific configuration actually encoded in the bespoke scripts.
-
-| Study | Build | ID linkage | Pre-ID step(s) | Part 1 | Completion | Part 2 special |
-| --- | --- | --- | --- | --- | --- | --- |
-| Brea_01_Erneg | 37 | Study link file | None | `neg=exclude_FR`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_fr_pm`, `alleles=search` | None |
-| Brea_02 | 37 | Study link file | None | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Clrt_01 | 37 | Study link file | `name_linkage` | `neg=exclude_PM`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=move`, `alleles=move` | None |
-| Ecvd_01 | 37 | Study link file | None | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Ecvd_02 | 37 | Study link file | `reset_positions` | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude_same`, `unknown=PM` | `chr=search`, `pos=search`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Ecvd_03 | 37 | Study link file | `ab_translate` | `neg=move`, `chrpos=exclude`, `alleles=move_same`, `unknown=PM` | `chr=move`, `pos=move`, `strand=flip_pm`, `alleles=move` | None |
-| Glbd_01 | 37 | Study link file | None | `neg=exclude_FR`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_fr_pm`, `alleles=search` | None |
-| Inte_01 | 36 | EPIC master only | None | `neg=exclude_PM`, `chrpos=move`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=move`, `alleles=move` | None |
-| Inte_02 | 37 | EPIC master only | None | `neg=exclude_PM`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=move`, `alleles=move` | None |
-| Inte_03 | 37 | EPIC master only | None | `neg=exclude_PM`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=move`, `alleles=search` | None |
-| Kidn_01 | 36 | Study link file | None | `neg=exclude_PM`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=move`, `strand=move`, `alleles=search` | None |
-| Kidn_02 | 37 | EPIC master only | None | `neg=exclude_PM`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=search`, `strand=move`, `alleles=search`, `txt_rel` | None |
-| Lung_01 | 37 | Study link file | None | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Lymp_01 | 36 | Study link file | None | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=flip_tb_pm`, `alleles=search`, `subversion_rel` | build-35 exclusion |
-| Ovar_01 | 37 | Study link file | None | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Panc_01 | 36 | Study link file | None | `neg=skip`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_pm`, `alleles=search` | None |
-| Panc_02 | 36 | Study link file | None | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=flip_tb_pm`, `alleles=search`, `subversion_rel` | build-35 exclusion |
-| Pros_01 | 36 | Study link file | `sort_input` | `neg=exclude_FR`, `chrpos=skip`, `alleles=exclude` | `chr=move`, `pos=move`, `strand=flip_fr_pm`, `alleles=move` | None |
-| Pros_02 | 37 | Study link file | None | `neg=skip`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_pm`, `alleles=search` | None |
-| Pros_03 | 37 | Study link file | `reset_positions` | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Pros_04 | 37 | Study link file | `exclude_xymt` | `neg=exclude_TB`, `chrpos=exclude`, `alleles=exclude` | `chr=search`, `pos=search`, `strand=flip_tb_pm`, `alleles=search` | None |
-| Stom_01 | 36 | Study link file | None | `neg=exclude_TB`, `chrpos=move`, `alleles=exclude` | `chr=move`, `pos=search`, `strand=flip_tb_pm`, `alleles=move` | None |
-| Uadt_01 | 37 | EPIC master only | `ab_translate`, `ab_txt_rel` | `neg=move`, `chrpos=exclude`, `alleles=move_all` | `chr=move`, `pos=move`, `strand=flip_pm`, `alleles=search` | None |
 

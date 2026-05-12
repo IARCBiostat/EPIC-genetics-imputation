@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ class StudySummary:
     fam_exists: bool
     summary_exists: bool
     sample_count: int | None
+    sample_ids: frozenset[tuple[str, str]]
     variant_count: int | None
     sex_1: int
     sex_2: int
@@ -77,8 +79,9 @@ def count_lines(path: Path) -> int:
         return sum(1 for _ in handle)
 
 
-def summarize_fam(path: Path) -> tuple[int, int, int, int, int, int, int]:
+def summarize_fam(path: Path) -> tuple[int, frozenset[tuple[str, str]], int, int, int, int, int, int]:
     sample_count = 0
+    sample_ids: set[tuple[str, str]] = set()
     sex_1 = 0
     sex_2 = 0
     sex_other = 0
@@ -94,6 +97,7 @@ def summarize_fam(path: Path) -> tuple[int, int, int, int, int, int, int]:
             if len(fields) < 6:
                 continue
             sample_count += 1
+            sample_ids.add((fields[0], fields[1]))
 
             sex = fields[4]
             if sex == "1":
@@ -111,7 +115,14 @@ def summarize_fam(path: Path) -> tuple[int, int, int, int, int, int, int]:
             else:
                 pheno_other += 1
 
-    return sample_count, sex_1, sex_2, sex_other, pheno_1, pheno_2, pheno_other
+    return sample_count, frozenset(sample_ids), sex_1, sex_2, sex_other, pheno_1, pheno_2, pheno_other
+
+
+def relative_display_path(path: Path, base: Path) -> str:
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return os.path.relpath(path, base)
 
 
 def collect_study_summary(analysis_root: Path, study_id: str) -> StudySummary:
@@ -123,6 +134,7 @@ def collect_study_summary(analysis_root: Path, study_id: str) -> StudySummary:
     summary_path = stage1_dir / "summary.txt"
 
     sample_count = None
+    sample_ids: frozenset[tuple[str, str]] = frozenset()
     variant_count = None
     sex_1 = 0
     sex_2 = 0
@@ -134,6 +146,7 @@ def collect_study_summary(analysis_root: Path, study_id: str) -> StudySummary:
     if fam_path.exists():
         (
             sample_count,
+            sample_ids,
             sex_1,
             sex_2,
             sex_other,
@@ -152,6 +165,7 @@ def collect_study_summary(analysis_root: Path, study_id: str) -> StudySummary:
         fam_exists=fam_path.exists(),
         summary_exists=summary_path.exists(),
         sample_count=sample_count,
+        sample_ids=sample_ids,
         variant_count=variant_count,
         sex_1=sex_1,
         sex_2=sex_2,
@@ -168,24 +182,26 @@ def fmt_int(value: int | None) -> str:
     return f"{value:,}"
 
 
-def build_markdown(analysis_root: Path, summaries: list[StudySummary]) -> str:
+def build_markdown(repo_root: Path, analysis_root: Path, summaries: list[StudySummary]) -> str:
     complete = [item for item in summaries if item.complete]
     incomplete = [item for item in summaries if not item.complete]
 
     total_samples = sum(item.sample_count or 0 for item in complete)
-    total_variants = sum(item.variant_count or 0 for item in complete)
+    unique_sample_ids: set[tuple[str, str]] = set()
+    for item in summaries:
+        unique_sample_ids.update(item.sample_ids)
 
     lines: list[str] = []
     lines.append("# Stage 1 Summary\n\n")
     lines.append(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
-    lines.append(f"Analysis root: `{analysis_root}`\n\n")
+    lines.append(f"Analysis root: `{relative_display_path(analysis_root, repo_root)}`\n\n")
 
     lines.append("## Overview\n\n")
     lines.append(f"- Expected studies: {len(summaries)}\n")
     lines.append(f"- Complete stage-1 outputs: {len(complete)}\n")
     lines.append(f"- Incomplete or missing studies: {len(incomplete)}\n")
     lines.append(f"- Total samples across complete studies: {total_samples:,}\n")
-    lines.append(f"- Total variants across complete studies: {total_variants:,}\n\n")
+    lines.append(f"- Total unique samples across studies with final `.fam` outputs: {len(unique_sample_ids):,}\n\n")
 
     lines.append("## Complete Studies\n\n")
     if complete:
@@ -219,6 +235,7 @@ def build_markdown(analysis_root: Path, summaries: list[StudySummary]) -> str:
 
     lines.append("## Notes\n\n")
     lines.append("- `Samples` are counted from the final `.fam` file.\n")
+    lines.append("- `Total unique samples` are counted from unique final `(FID, IID)` pairs across all available stage-1 `.fam` files.\n")
     lines.append("- `Variants` are counted from the final `.bim` file.\n")
     lines.append("- `Sex 1` and `Sex 2` come from column 5 of the final `.fam` file.\n")
     lines.append("- `Pheno 1` and `Pheno 2` come from column 6 of the final `.fam` file.\n")
@@ -228,6 +245,7 @@ def build_markdown(analysis_root: Path, summaries: list[StudySummary]) -> str:
 
 def main() -> None:
     args = parse_args()
+    repo_root = Path(__file__).resolve().parents[2]
     analysis_root = Path(args.analysis_root).resolve()
     scripts_dir = Path(args.scripts_dir).resolve()
     output_path = Path(args.output).resolve()
@@ -236,10 +254,10 @@ def main() -> None:
     summaries = [collect_study_summary(analysis_root, study_id) for study_id in study_ids]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(build_markdown(analysis_root, summaries))
+    output_path.write_text(build_markdown(repo_root, analysis_root, summaries))
 
     complete_count = sum(1 for item in summaries if item.complete)
-    print(f"Wrote {output_path}")
+    print(f"Wrote {relative_display_path(output_path, repo_root)}")
     print(f"Expected studies: {len(summaries)}")
     print(f"Complete studies: {complete_count}")
     print(f"Incomplete studies: {len(summaries) - complete_count}")

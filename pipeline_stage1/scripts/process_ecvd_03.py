@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 
 from script_utils import (
+    configure_plink,
     copy_prefix,
     ensure_dirs,
     liftover_to_hg38,
@@ -17,19 +18,20 @@ from script_utils import (
     python2_cmd,
     q,
     remove_prefix,
+    resolve_epic_reference_file,
     run,
-    write_empty_file,
+    apply_epic_sample_metadata,
     write_summary,
 )
 
 
 PREFIX = 'Ecvd_03'
 STUDY_ID = 'Ecvd_03'
-RAW_REL = 'Epic_Cvd/Ecvd_03/Data_Received/EPICCVD_Exome_CVDcases_for_IARC'
-MANIFEST_REL = 'Epic_Cvd/Ecvd_03/Chip_files/exoplus_v2_clean_manif_B37.csv'
+RAW_REL = 'genetics/Ecvd_03/Data_Received/EPICCVD_Exome_CVDcases_for_IARC'
+MANIFEST_REL = 'genetics/Ecvd_03/Chip_files/exoplus_v2_clean_manif_B37.csv'
 MANIFEST_FLAGS = '-c 11 -p 12 -n 1 -a 3 -sp 13 -st 2 -sf 0 -b 9 -nlh 1'
 BUILD = '37'
-ID_LINK_REL = 'Epic_Cvd/Ecvd_03/Data_Received/EPICCVD_Exome_CVDcases_for_IARC_link_to_idepic.txt'
+ID_LINK_REL = 'genetics/Ecvd_03/Data_Received/EPICCVD_Exome_CVDcases_for_IARC_link_to_idepic.txt'
 ID_FLAGS = '-nlh 1 -s 1 -e 0 -q'
 QC_REFERENCE_PREFIX = 'Ecvd_03'
 PRE = {'ab_translate': True}
@@ -56,9 +58,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=f"Stage 1 processing for {STUDY_ID}")
     parser.add_argument('--data-root', required=True, help='Root directory containing the raw EPIC genetics datasets.')
     parser.add_argument('--work-root', default=str(Path(__file__).resolve().parents[1] / 'work'), help='Output root for stage-1 processing results.')
+    parser.add_argument('--outdir', default=str(Path(__file__).resolve().parents[2] / 'analysis'), help='Analysis root for final stage-1 outputs.')
     parser.add_argument('--plink', default='plink', help='PLINK executable to use.')
     parser.add_argument('--python2', default='python2.7', help='Python 2 interpreter for legacy preprocessing utilities.')
     args = parser.parse_args()
+    args.plink = configure_plink(args.plink)
 
     data_root = Path(args.data_root).resolve()
     work_root = Path(args.work_root).resolve()
@@ -70,7 +74,7 @@ def main() -> None:
     qc_completion = trace / 'QC_completion'
     qc_exclusion = trace / 'QC_exclusion'
     lift_dir = trace / 'LiftOver'
-    stage1_dir = pipeline_root.parent / 'analysis' / STUDY_ID / 'stage1'
+    stage1_dir = Path(args.outdir).resolve() / STUDY_ID / 'stage1'
     summary = stage1_dir / 'summary.txt'
 
     ensure_dirs([study_dir, trace, qcinit, qc_completion, qc_exclusion, lift_dir, stage1_dir])
@@ -159,7 +163,7 @@ def main() -> None:
         current_id_prefix_name = trad_ab_name
 
     id_input_prefix = trace / current_id_prefix_name
-    id_args = f"-f {q(id_input_prefix.with_suffix('.fam'))} -i {q(data_root / 'Reference/Epic/Subj_Id_2015.txt')}"
+    id_args = f"-f {q(id_input_prefix.with_suffix('.fam'))} -i {q(resolve_epic_reference_file(data_root, 'Subj_Id_2015.txt'))}"
     if ID_LINK_REL:
         id_args += f" -l {q(data_root / ID_LINK_REL)}"
     if ID_FLAGS:
@@ -172,21 +176,18 @@ def main() -> None:
 
     good_ids = trace / f"{PREFIX}_goodID.txt"
     remove_ids = trace / f"{PREFIX}_removeID.txt"
-    epic_sex = trace / f"{PREFIX}_EPIC_sex"
-    epic_rm = trace / f"{PREFIX}_EPIC_sex_rmID"
-    epic_id = trace / f"{PREFIX}_EPIC_sex_ID"
-    epic_pheno = trace / f"{PREFIX}_EPIC_sex_ID_pheno"
+    epic_rm = trace / f"{PREFIX}_EPIC_rmID"
+    epic_id = trace / f"{PREFIX}_EPIC_ID"
+    epic_pheno = trace / f"{PREFIX}_EPIC_ID_pheno"
     epic_all = trace / f"{PREFIX}_EPIC_all"
 
-    run(plink_cmd(args.plink, f"--bfile {q(id_input_prefix)} --update-sex {q(good_ids)} 3 --make-bed --out {q(epic_sex)}"), study_dir)
-    run(plink_cmd(args.plink, f"--bfile {q(epic_sex)} --remove {q(remove_ids)} --make-bed --out {q(epic_rm)}"), study_dir)
+    run(plink_cmd(args.plink, f"--bfile {q(id_input_prefix)} --remove {q(remove_ids)} --make-bed --out {q(epic_rm)}"), study_dir)
     run(plink_cmd(args.plink, f"--bfile {q(epic_rm)} --update-ids {q(good_ids)} --make-bed --out {q(epic_id)}"), study_dir)
-    empty_file = trace / 'empty_file.txt'
-    write_empty_file(empty_file)
-    run(plink_cmd(args.plink, f"--bfile {q(epic_id)} --make-pheno {q(empty_file)} 1 --make-bed --out {q(epic_pheno)}"), study_dir)
-    empty_file.unlink(missing_ok=True)
+    apply_epic_sample_metadata(epic_id, epic_pheno, data_root, STUDY_ID, summary, strict=False)
     run(plink_cmd(args.plink, f"--bfile {q(epic_pheno)} --indiv-sort n --make-bed --out {q(epic_all)}"), study_dir)
-    run(f"rm -f {q(str(trace / (PREFIX + '_EPIC_sex')))}*", study_dir)
+    remove_prefix(epic_rm, study_dir)
+    remove_prefix(epic_id, study_dir)
+    remove_prefix(epic_pheno, study_dir)
     remove_prefix(id_input_prefix, study_dir)
 
     part1_current = f"{PREFIX}_EXC1_SNPfound"

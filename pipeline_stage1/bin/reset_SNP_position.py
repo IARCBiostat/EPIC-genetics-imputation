@@ -20,6 +20,7 @@ parser.add_argument('--file', '-f', type=str, help='Path to the data files.', re
 args = parser.parse_args()
 
 file_plink = args.file
+plink = os.environ.get("PLINK_BIN", "plink")
 
 with open(file_plink+".bim") as bim_file, open(file_plink+"_reset_chr.txt", 'w') as out_chr, open(file_plink+"_reset_pos.txt", 'w') as out_pos:
 	for line in bim_file:
@@ -32,8 +33,7 @@ with open(file_plink+".bim") as bim_file, open(file_plink+"_reset_chr.txt", 'w')
 		out_pos.write(name + "\t0\n")
 
 # we use plink to update chromosome and position with the missing data
-os.system('plink --bfile ' + file_plink + ' --update-chr ' + file_plink + '_reset_chr.txt --make-bed --out ' + file_plink + '_reset_chr')
-os.system('plink --bfile ' + file_plink + '_reset_chr --update-map ' + file_plink + '_reset_pos.txt --make-bed --out ' + file_plink + '_reset_all_pos')
+os.system(plink + ' --bfile ' + file_plink + ' --update-chr ' + file_plink + '_reset_chr.txt --make-bed --out ' + file_plink + '_reset_chr')
+os.system(plink + ' --bfile ' + file_plink + '_reset_chr --update-map ' + file_plink + '_reset_pos.txt --make-bed --out ' + file_plink + '_reset_all_pos')
 
 os.system("rm " + file_plink + "_reset_chr.* " + file_plink + "_reset_pos.txt")
-

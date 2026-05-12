@@ -10,8 +10,6 @@
 # - [file]_goodAlleles_[genome_version]_results.txt
 # - [file]_goodAlleles_strand.txt
 
-#bsub -eo search_alleles_csv_err.txt -oo search_alleles_csv_out.txt 'source /opt/rh/python27/enable ; /data/epic-nmb/Scripts/Normalisation/Completion_Lift/Alleles/search_alleles_csv.py -b [bim_file] -m [csv_file_from_Illumina] -t [loci_to_rsID_file]'
-
 #script written by Manon Knuchel in May 2019 based on the first version developped in May 2018 by Emilie Gerard-Marchant & Benjamin Bourgeois
 
 ##MODULES

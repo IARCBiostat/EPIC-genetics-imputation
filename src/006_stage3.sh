@@ -47,14 +47,24 @@ resolve_project_root() {
 
 abs_path() {
   local target="$1"
-  if [ -d "$target" ]; then
-    (cd "$target" && pwd)
-  else
-    local parent
-    parent="$(dirname "$target")"
-    parent="$(cd "$parent" 2>/dev/null && pwd)"
-    printf '%s/%s\n' "$parent" "$(basename "$target")"
+  local parent
+  local base
+
+  if [[ "$target" = /* ]]; then
+    printf '%s\n' "$target"
+    return 0
   fi
+
+  parent="$(dirname "$target")"
+  base="$(basename "$target")"
+
+  if [ "$parent" = "." ]; then
+    parent="$(pwd)"
+  else
+    parent="$(cd "$parent" 2>/dev/null && pwd)"
+  fi
+
+  printf '%s/%s\n' "$parent" "$base"
 }
 
 resolve_dbsnp_vcf() {
@@ -91,7 +101,7 @@ resolve_dbsnp_tbi() {
 
 print_help() {
   cat <<'EOF'
-Usage: sbatch src/005_stage3.sh [options]
+Usage: sbatch src/006_stage3.sh [options]
 
 Options:
   --profile <name>                  Nextflow profile to use (default: slurm)
@@ -105,6 +115,7 @@ Options:
   --min-r2 <value>                  Minimum imputation R2 (default: 0.3)
   --maf <value>                     Minimum MAF (default: 0.01)
   --hwe-p <value>                   HWE p-value threshold (default: 0.000005)
+  --run-hwe                         Re-enable stage-3 HWE filtering (disabled by default; stage-1 handoff owns HWE)
   --no-hwe                          Disable HWE filtering
   --exclude-ancestry-outliers       Exclude ancestry outliers from the final dataset
   --no-exclude-ancestry-outliers    Keep ancestry outliers in the final dataset
@@ -127,8 +138,8 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
   sbatch \
     --export=ALL \
     --job-name "${STAGE3_JOB_NAME:-stage3_postimpute}" \
-    --output "${STAGE3_LOG_OUT:-${PROJ_ROOT}/src/logs/005_stage3_%j.out}" \
-    --error "${STAGE3_LOG_ERR:-${PROJ_ROOT}/src/logs/005_stage3_%j.err}" \
+    --output "${STAGE3_LOG_OUT:-${PROJ_ROOT}/src/logs/006_stage3_%j.out}" \
+    --error "${STAGE3_LOG_ERR:-${PROJ_ROOT}/src/logs/006_stage3_%j.err}" \
     --time "${STAGE3_TIME:-10-00:00:00}" \
     --mem "${STAGE3_MEM:-32G}" \
     --cpus-per-task "${STAGE3_CPUS:-4}" \
@@ -175,7 +186,7 @@ KING_CUTOFF="${STAGE3_KING_CUTOFF:-0.0884}"
 ANCESTRY_PC_COUNT="${STAGE3_ANCESTRY_PC_COUNT:-10}"
 ANCESTRY_Z_THRESHOLD="${STAGE3_ANCESTRY_Z_THRESHOLD:-6.0}"
 HET_SD_THRESHOLD="${STAGE3_HET_SD_THRESHOLD:-3.0}"
-EXCLUDE_ANCESTRY_OUTLIERS="${STAGE3_EXCLUDE_ANCESTRY_OUTLIERS:-false}"
+EXCLUDE_ANCESTRY_OUTLIERS="${STAGE3_EXCLUDE_ANCESTRY_OUTLIERS:-true}"
 RESUME=1
 EXTRA_ARGS=()
 
@@ -224,6 +235,10 @@ while [[ $# -gt 0 ]]; do
     --hwe-p)
       HWE_P="$2"
       shift 2
+      ;;
+    --run-hwe)
+      RUN_HWE="true"
+      shift
       ;;
     --no-hwe)
       RUN_HWE="false"
@@ -281,6 +296,15 @@ export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
 conda activate nf_EPIC-genetics || true
 unset R_HOME
+if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/java" ]; then
+  export JAVA_HOME="${CONDA_PREFIX}"
+  export JAVA_CMD="${CONDA_PREFIX}/bin/java"
+else
+  unset JAVA_CMD
+  if [ -n "${JAVA_HOME:-}" ] && [ ! -x "${JAVA_HOME}/bin/java" ]; then
+    unset JAVA_HOME
+  fi
+fi
 
 if command -v conda >/dev/null 2>&1; then
   CONDA_BASE="$(conda info --base)"
@@ -405,6 +429,12 @@ echo "Building stage-3 summary..."
   --stage1-root "${STAGE1_ROOT}" \
   --stage2-root "${STAGE2_ROOT}" \
   --output "${SUMMARY_OUTPUT}"
+
+echo ""
+echo "Generating stage-3 tables, figures, flags, and report bundles..."
+"${PYTHON3_BIN}" "${PIPELINE_DIR}/bin/run_stage3_reports.py" \
+  --analysis-root "${OUTDIR}" \
+  --studies "${STUDY}"
 
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))

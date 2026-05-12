@@ -1,6 +1,11 @@
 #!/bin/bash
-# Script: src/001_data-genetics.sh
-# Purpose: Sync raw genetics data, manifests, and reference files (Local Sync).
+#SBATCH --job-name=001_data_genetics
+#SBATCH --output=src/logs/001_data_genetics.out
+#SBATCH --error=src/logs/001_data_genetics.err
+#SBATCH --time=10-00:00:00
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=2
+#SBATCH --partition=low_p
 
 set -euo pipefail
 trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
@@ -18,6 +23,7 @@ done
 
 SOURCE_ROOT="/data/Epic/subprojects/Genetics/sources/Gwas"
 DEST_ROOT="data/genetics"
+EPIC_REF_DEST_ROOT="data/reference/Epic"
 
 echo "=========================================="
 echo " Synchronizing Genetics Data"
@@ -26,13 +32,27 @@ echo " To:   $DEST_ROOT"
 echo "=========================================="
 
 mkdir -p "$DEST_ROOT"
+mkdir -p "$EPIC_REF_DEST_ROOT"
+
+rsync -avP "${SOURCE_ROOT}/Reference/Epic/Subj_Id_2015.txt" "${EPIC_REF_DEST_ROOT}/Subj_Id_2015.txt"
+rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_caco.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_caco.sas7bdat"
+rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_id.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_id.sas7bdat"
+rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics.sas7bdat"
 
 # ── Study Definition Mapping ──────────────────────────────────────────────────
-# Format: "StudyFolderName"|"StudySubPath"|"DataFolderName" (Optional)
+# Format:
+# "StudyFolderName"|"StudySubPath"|"DataFolderName"|"ChipFolderName"|"ExtraPlinkPrefix"|"ExtraPlinkDest"|"ExtraFilePath"|"ExtraFileDest"
+# Optional overrides:
+#   DataFolderName: defaults to Data_Received, use "." for flat sync
+#   ChipFolderName: defaults to Chip_files, use "." to skip chip sync
+#   ExtraPlinkPrefix: source prefix relative to SOURCE_ROOT, synced as .bed/.bim/.fam
+#   ExtraPlinkDest: destination directory relative to the study target directory
+#   ExtraFilePath: source file relative to SOURCE_ROOT
+#   ExtraFileDest: destination file relative to the study target directory
 STUDIES=(
     "Brea_01_Erneg|Breast/Brea_01_Erneg"
     "Brea_02_Onco|Breast/Brea_02_Onco"
-    "Clrt_01_Gecco|Colonrectum/Clrt_01_Gecco"
+    "Clrt_01_Gecco|Colonrectum/Clrt_01_Gecco|Data_Received|Chip_files|Extraction/Clrt_Data_Extracted/clrt_gecco_geno|Data_Received/Data_Extracted"
     "Ecvd_01|Epic_Cvd/Ecvd_01"
     "Ecvd_02|Epic_Cvd/Ecvd_02"
     "Ecvd_03|Epic_Cvd/Ecvd_03"
@@ -51,7 +71,7 @@ STUDIES=(
     "Pros_02_Icogs|Prostate/Pros_02_Icogs"
     "Pros_03_Onco|Prostate/Pros_03_Onco"
     "Pros_04_P160555|Prostate/Pros_04_P160555"
-    "Ovar_01|Ovar_01|Data_Received_2021"
+    "Ovar_01|Ovary/Ovar_01|Data_Received_2022|Chip_files|||Ovary/Ovar_01/Data_Received_2021/Link_Ids_Ovar_01Onco.csv|Data_Received_2021/Link_Ids_Ovar_01Onco.csv"
     "Stom_01|Stomach/Stom_01"
     "Uadt_01|Uadt/Uadt_01"
     "Corpus_Uteri|Corpus_Uteri/GSA2022_922_025_V3/|.|."
@@ -59,8 +79,9 @@ STUDIES=(
 
 # ── Sync Loop ──────────────────────────────────────────────────────────────────
 for entry in "${STUDIES[@]}"; do
-    IFS="|" read -r STUDY_NAME SUB_PATH DATA_OVERRIDE <<< "$entry"
+    IFS="|" read -r STUDY_NAME SUB_PATH DATA_OVERRIDE CHIP_OVERRIDE EXTRA_PLINK_PREFIX EXTRA_PLINK_DEST EXTRA_FILE_PATH EXTRA_FILE_DEST <<< "$entry"
     DATA_FLD="${DATA_OVERRIDE:-Data_Received}"
+    CHIP_FLD="${CHIP_OVERRIDE:-Chip_files}"
     
     echo "--- Syncing ${STUDY_NAME} ---"
     
@@ -77,8 +98,22 @@ for entry in "${STUDIES[@]}"; do
     fi
 
     # 2. Sync Chip files (Skip if already handled by flat sync or explicitly excluded)
-    if [[ "$DATA_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then
-       rsync -avP "${SOURCE_ROOT}/${SUB_PATH}/Chip_files/" "${TGT_DIR}/Chip_files/"
+    if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then
+       rsync -avP "${SOURCE_ROOT}/${SUB_PATH}/${CHIP_FLD}/" "${TGT_DIR}/${CHIP_FLD}/"
+    fi
+
+    # 3. Overlay study-specific raw PLINK prefixes when they live outside the study folder
+    if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
+        mkdir -p "${TGT_DIR}/${EXTRA_PLINK_DEST}"
+        for ext in bed bim fam; do
+            rsync -avP "${SOURCE_ROOT}/${EXTRA_PLINK_PREFIX}.${ext}" "${TGT_DIR}/${EXTRA_PLINK_DEST}/"
+        done
+    fi
+
+    # 4. Sync extra study-specific single files when needed
+    if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then
+        mkdir -p "$(dirname "${TGT_DIR}/${EXTRA_FILE_DEST}")"
+        rsync -avP "${SOURCE_ROOT}/${EXTRA_FILE_PATH}" "${TGT_DIR}/${EXTRA_FILE_DEST}"
     fi
 done
 

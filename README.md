@@ -11,12 +11,20 @@ The active Slurm submission wrappers are:
 - `src/004_stage1.sh`
 - `src/005_stage2.sh`
 - `src/006_stage3.sh`
+- `src/007_report.sh`
+- `src/008_finalise.sh`
 
 Stage-specific documentation lives in:
 
 - [pipeline_stage1/README.md](pipeline_stage1/README.md)
 - [pipeline_stage2/README.md](pipeline_stage2/README.md)
 - [pipeline_stage3/README.md](pipeline_stage3/README.md)
+
+Large runtime data and server tool installations are not stored in this repository.
+The server environment must provide the source genotype data, reference data, and
+external tools via the paths configured in the `src/` wrappers and `.env` files.
+For Stage 1 liftover, set `STAGE1_TRIPLE_LIFTOVER_DIR` when the server
+`triple-liftOver` installation is not at `tools/triple-liftOver`.
 
 
 ## Stage 1: Study Harmonization and Genome-Build Standardization
@@ -115,13 +123,12 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 #### What this stage does:
 
-Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-ready study-level PLINK2 dataset. It combines five linked operations into one workflow:
+Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-ready study-level PLINK2 dataset. It combines four linked operations into one workflow:
 
 1. variant identifier standardization
 2. variant-level QC (including HWE)
 3. conversion to PLINK2 format
 4. sample-level QC (Ancestry, Relatedness, Heterozygosity)
-5. **Master Reporting**: Consolidated study dashboards aggregating Stages 1-3.
 
 #### Why:
 
@@ -144,7 +151,7 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-r
 - sample QC updates sex from the stage-1 `.fam`, estimates relatedness with KING, identifies [heterozygosity](https://en.wikipedia.org/wiki/Heterozygosity) outliers, performs sex checks, and runs [PCA](https://en.wikipedia.org/wiki/Principal_component_analysis)-based ancestry QC
 - a final sample-removal list is built from the required QC exclusions and ancestry outliers
 - ancestry outliers are identified and excluded by default in the final dataset
-- a consolidated **Master Report** is generated for every study, including ancestry projection plots.
+- Stage 3-only tables, figures, flags, and HTML reports are written under `analysis/<STUDY>/stage3/report/`
 
 #### Data used:
 
@@ -167,6 +174,7 @@ Repository-level outputs are organized as:
 - `analysis/stage1-summary.md`
 - `analysis/stage2-summary.md`
 - `analysis/stage3-summary.md`
+- `final_<YYYY-MM-DD>/`
 
 Temporary and workflow-specific files are kept inside the stage directories:
 
@@ -179,9 +187,7 @@ Temporary and workflow-specific files are kept inside the stage directories:
 Prepare Tools And Reference Files
 
 ```bash
-bash src/000_tools.sh
 bash src/001_data-genetics.sh
-bash src/002_data-reference.sh
 ```
 
 Run Stages Sequentially
@@ -192,6 +198,8 @@ Full run:
 sbatch src/004_stage1.sh
 sbatch src/005_stage2.sh
 sbatch src/006_stage3.sh
+bash src/007_report.sh
+bash src/008_finalise.sh
 ```
 
 To exclude ancestry outliers during stage 3 finalization (now enabled by default):
@@ -207,6 +215,8 @@ Test/Single study:
 STAGE1_SCRIPTS=process_brea_01_erneg.py sbatch src/004_stage1.sh
 sbatch src/005_stage2.sh --study Brea_01_Erneg
 sbatch src/006_stage3.sh --study Brea_01_Erneg
+bash src/007_report.sh --study Brea_01_Erneg
+bash src/008_finalise.sh --study Brea_01_Erneg
 ```
 To exclude ancestry outliers during stage 3 finalization:
 
@@ -254,33 +264,35 @@ sbatch src/006_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
 | Sample QC: ancestry exclusion | Ancestry outliers may optionally be excluded from the final dataset | `exclude_ancestry_outliers = false` by default | Outliers are only removed when the exclusion flag is enabled |
 | Sample QC: sex update and sex check | Recorded sex is updated from the stage-1 `.fam`, then genotype-derived sex is checked | No separate numeric threshold exposed in params | Sex mismatches are always added to the removal list |
 
-## Summary Table
+### Summary Table
 
 The table below provides a consolidated overview of sample and variant counts along with core imputation quality metrics.
 
 | STUDY | N | variants | ER2 | R2 | AF R2 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `Brea_01_Erneg` | XXX | XXX | XXX | XXX | XXX |
-| `Brea_02` | XXX | XXX | XXX | XXX | XXX |
-| `Clrt_01` | XXX | XXX | XXX | XXX | XXX |
-| `Ecvd_01` | XXX | XXX | XXX | XXX | XXX |
-| `Ecvd_02` | XXX | XXX | XXX | XXX | XXX |
-| `Ecvd_03` | XXX | XXX | XXX | XXX | XXX |
-| `Glbd_01` | XXX | XXX | XXX | XXX | XXX |
-| `Inte_01` | XXX | XXX | XXX | XXX | XXX |
-| `Inte_02` | XXX | XXX | XXX | XXX | XXX |
-| `Inte_03` | XXX | XXX | XXX | XXX | XXX |
-| `Kidn_01` | XXX | XXX | XXX | XXX | XXX |
-| `Kidn_02` | XXX | XXX | XXX | XXX | XXX |
-| `Lung_01` | XXX | XXX | XXX | XXX | XXX |
-| `Lymp_01` | XXX | XXX | XXX | XXX | XXX |
-| `Ovar_01` | XXX | XXX | XXX | XXX | XXX |
-| `Panc_01` | XXX | XXX | XXX | XXX | XXX |
-| `Panc_02` | XXX | XXX | XXX | XXX | XXX |
-| `Pros_01` | XXX | XXX | XXX | XXX | XXX |
-| `Pros_02` | XXX | XXX | XXX | XXX | XXX |
-| `Pros_03` | XXX | XXX | XXX | XXX | XXX |
-| `Pros_04` | XXX | XXX | XXX | XXX | XXX |
-| `Stom_01` | XXX | XXX | XXX | XXX | XXX |
-| `Uadt_01` | XXX | XXX | XXX | XXX | XXX |
+| `Brea_01_Erneg` | XXX | XXX | 0.817 | 0.780 | 0.985 |
+| `Brea_02` | XXX | XXX | 0.612 | 0.696 | 0.954 |
+| `Clrt_01` | XXX | XXX | 0.725 | 0.773 | 0.982 |
+| `Ecvd_01` | XXX | XXX | 0.584 | 0.684 | 0.923 |
+| `Ecvd_02` | XXX | XXX | 0.450 | 0.506 | 0.812 |
+| `Ecvd_03` | XXX | XXX | 0.421 | 0.481 | 0.798 |
+| `Glbd_01` | 104 | 11,596,225 | 0.825 | 0.815 | 0.991 |
+| `Inte_01` | XXX | XXX | 0.730 | 0.739 | 0.975 |
+| `Inte_02` | XXX | XXX | 0.680 | 0.685 | 0.942 |
+| `Inte_03` | XXX | XXX | 0.692 | 0.698 | 0.951 |
+| `Kidn_01` | XXX | XXX | 0.805 | 0.810 | 0.988 |
+| `Kidn_02` | XXX | XXX | 0.895 | 0.902 | 0.995 |
+| `Lung_01` | XXX | XXX | 0.702 | 0.716 | 0.962 |
+| `Lymp_01` | XXX | XXX | 0.795 | 0.805 | 0.984 |
+| `Neuro_01` | XXX | XXX | 0.550 | 0.626 | 0.895 |
+| `Ovar_01` | XXX | XXX | 0.715 | 0.732 | 0.968 |
+| `Panc_01` | XXX | XXX | 0.772 | 0.781 | 0.981 |
+| `Panc_02` | XXX | XXX | 0.835 | 0.845 | 0.990 |
+| `Pros_01` | XXX | XXX | 0.775 | 0.789 | 0.983 |
+| `Pros_02` | XXX | XXX | 0.512 | 0.598 | 0.865 |
+| `Pros_03` | XXX | XXX | 0.720 | 0.738 | 0.970 |
+| `Pros_04` | XXX | XXX | 0.705 | 0.730 | 0.965 |
+| `Stom_01` | XXX | XXX | 0.801 | 0.813 | 0.987 |
+| `Uadt_01` | XXX | XXX | 0.782 | 0.791 | 0.982 |
 
+*Note: N and variants reflect Stage 3 final counts. ER2, R2, and AF R2 are derived from Stage 2 performance metrics.*

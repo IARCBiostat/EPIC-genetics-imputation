@@ -1,13 +1,16 @@
 process PREP_TARGET_VCF {
-    tag "${study_name}"
-    cpus 4
-    memory '16 GB'
+    tag "${study_name}/chr${chr}"
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        def output_name = filename.tokenize('/').last()
+        def study = output_name.replaceFirst(/_chr.*$/, '')
+        return "${study}/stage2/target/${output_name}"
+    }
 
     input:
-    tuple val(study_name), val(base), path(bed), path(bim), path(fam)
+    tuple val(study_name), val(chr), val(base), path(bed), path(bim), path(fam)
 
     output:
-    tuple val(study_name), path("target/${study_name}_chr*.vcf.gz"), path("target/${study_name}_chr*.vcf.gz.tbi")
+    tuple val(chr), val(study_name), path("target/${study_name}_chr${chr}.vcf.gz"), path("target/${study_name}_chr${chr}.vcf.gz.tbi"), optional: true
 
     script:
     """
@@ -46,33 +49,31 @@ MT	chrMT
 M	chrMT
 EOF
 
-    for chr in {1..22} X; do
-        if ! awk -v chr="\$chr" '
-            \$1 == chr || (chr == "X" && (\$1 == "23" || \$1 == "chrX")) {
-                found = 1
-                exit 0
-            }
-            END {
-                exit(found ? 0 : 1)
-            }
-        ' ${bim} ; then
-            echo "Skipping chr\${chr}: no variants present in the stage-1 BIM"
-            continue
-        fi
+    if ! awk -v chr="${chr}" '
+        \$1 == chr || (chr == "X" && (\$1 == "23" || \$1 == "chrX")) {
+            found = 1
+            exit 0
+        }
+        END {
+            exit(found ? 0 : 1)
+        }
+    ' ${bim} ; then
+        echo "Skipping chr${chr}: no variants present in the stage-1 BIM"
+        exit 0
+    fi
 
-        \$PLINK_BIN --bfile ${bed.baseName} \\
-              --chr \$chr \\
-              --recode vcf bgz \\
-              --out tmp_${study_name}_chr\${chr}
+    \$PLINK_BIN --bfile ${bed.baseName} \\
+          --chr ${chr} \\
+          --recode vcf bgz \\
+          --out tmp_${study_name}_chr${chr}
 
-        \$BCFTOOLS_BIN annotate --rename-chrs chr_name_conv.txt tmp_${study_name}_chr\${chr}.vcf.gz -Ou | \\
-            \$BCFTOOLS_BIN annotate -x ID -I +'%CHROM:%POS:%REF:%ALT' -Ou | \\
-            \$BCFTOOLS_BIN norm -m -any -Oz -o target/${study_name}_chr\${chr}.vcf.gz
+    \$BCFTOOLS_BIN annotate --rename-chrs chr_name_conv.txt tmp_${study_name}_chr${chr}.vcf.gz -Ou | \\
+        \$BCFTOOLS_BIN annotate -x ID -I +'%CHROM:%POS:%REF:%ALT' -Ou | \\
+        \$BCFTOOLS_BIN norm -m -any -Oz -o target/${study_name}_chr${chr}.vcf.gz
 
-        \$BCFTOOLS_BIN index -f -t target/${study_name}_chr\${chr}.vcf.gz
+    \$BCFTOOLS_BIN index -f -t target/${study_name}_chr${chr}.vcf.gz
 
-        rm -f tmp_${study_name}_chr\${chr}.log tmp_${study_name}_chr\${chr}.nosex
-        rm -f tmp_${study_name}_chr\${chr}.vcf.gz tmp_${study_name}_chr\${chr}.vcf.gz.tbi
-    done
+    rm -f tmp_${study_name}_chr${chr}.log tmp_${study_name}_chr${chr}.nosex
+    rm -f tmp_${study_name}_chr${chr}.vcf.gz tmp_${study_name}_chr${chr}.vcf.gz.tbi
     """
 }
