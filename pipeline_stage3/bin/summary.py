@@ -107,6 +107,22 @@ def count_fam_lines(path: Path) -> int | None:
         return sum(1 for line in handle if line.strip())
 
 
+def final_paths(stage3_dir: Path, study_id: str) -> tuple[Path, Path, Path]:
+    final_dir = stage3_dir / "final"
+    nested = (
+        final_dir / f"{study_id}.pgen",
+        final_dir / f"{study_id}.pvar",
+        final_dir / f"{study_id}.psam",
+    )
+    if any(path.exists() for path in nested):
+        return nested
+    return (
+        stage3_dir / f"{study_id}.pgen",
+        stage3_dir / f"{study_id}.pvar",
+        stage3_dir / f"{study_id}.psam",
+    )
+
+
 def parse_study_ids(analysis_root: Path, stage1_root: Path, stage2_root: Path, studies_arg: str) -> list[str]:
     if studies_arg != "all":
         return sorted({item.strip() for item in studies_arg.split(",") if item.strip()})
@@ -131,14 +147,11 @@ def load_tsv_row(path: Path) -> dict[str, str] | None:
 def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str) -> StudySummary:
     stage1_fam = stage1_root / study_id / "stage1" / f"{study_id}.fam"
     stage3_dir = analysis_root / study_id / "stage3"
-    final_pgen = stage3_dir / f"{study_id}.pgen"
-    final_pvar = stage3_dir / f"{study_id}.pvar"
-    final_psam = stage3_dir / f"{study_id}.psam"
+    final_pgen, final_pvar, final_psam = final_paths(stage3_dir, study_id)
 
-    variant_qc_dir = stage3_dir / "qc" / "variant_qc"
-    sample_qc_dir = stage3_dir / "qc" / "sample_qc"
-    variant_qc_files = sorted(variant_qc_dir.glob("*.variant_qc.tsv"))
-    sample_qc_path = sample_qc_dir / f"{study_id}.sample_qc.tsv"
+    report_tables_dir = stage3_dir / "report" / "tables"
+    variant_qc_files = sorted(report_tables_dir.glob("*.variant_metrics.tsv"))
+    sample_qc_path = report_tables_dir / f"{study_id}.sample_review.tsv"
     sample_qc_row = load_tsv_row(sample_qc_path) or {}
 
     input_variants = 0
@@ -157,6 +170,11 @@ def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str)
 
     stage1_samples = count_fam_lines(stage1_fam)
     stage3_samples = count_non_header_lines(final_psam)
+    if stage3_samples is None and sample_qc_row:
+        pre_final_samples = int(sample_qc_row.get("pre_final_samples", 0) or 0)
+        total_removed_for_fallback = int(sample_qc_row.get("total_removed", 0) or 0)
+        if pre_final_samples:
+            stage3_samples = max(pre_final_samples - total_removed_for_fallback, 0)
     final_variants, rsid_variants, fallback_variants, other_final_ids = summarize_final_pvar(final_pvar)
     post_hwe_variants = final_variants if final_variants is not None else per_chrom_post_hwe_variants
 
@@ -175,9 +193,9 @@ def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str)
     if not final_psam.exists():
         status_parts.append("psam-missing")
     if len(variant_qc_files) != len(EXPECTED_CHROMS):
-        status_parts.append(f"variant-qc {len(variant_qc_files)}/{len(EXPECTED_CHROMS)}")
+        status_parts.append(f"variant-metrics {len(variant_qc_files)}/{len(EXPECTED_CHROMS)}")
     if not sample_qc_path.exists():
-        status_parts.append("sample-qc-missing")
+        status_parts.append("sample-review-missing")
     if stage1_samples is not None and stage3_samples is not None and stage3_samples > stage1_samples:
         status_parts.append("sample-count-increase")
     if other_final_ids > 0:

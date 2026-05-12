@@ -1,7 +1,5 @@
 process PREP_DBSNP_CHROM {
     tag "chr${chr}"
-    cpus 1
-    memory '8 GB'
 
     input:
     tuple val(chr), path(dbsnp_vcf), path(dbsnp_tbi)

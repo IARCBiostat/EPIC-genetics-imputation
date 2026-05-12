@@ -10,8 +10,6 @@
 # - [file]_goodPos_[genomeVersion].txt
 # - [file]_goodPos_[genome_version]_results.txt'
 
-#bsub -eo search_pos_csv_err.txt -oo search_pos_csv_out.txt 'source /opt/rh/python27/enable ; /date/epic-nmb/Scripts/Normalisation/Completion_Lift/Pos/search_pos_csv.py -b [bim_file] -m [manifest_file] -t [loci_to_rsID_file]'
-
 #script written by Manon Knuchel in May 2019 based on the first version developped in May 2018 by Emilie Gerard-Marchant & Benjamin Bourgeois
 
 ##MODULES

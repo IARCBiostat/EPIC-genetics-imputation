@@ -2,8 +2,9 @@
 
 process PHASE_AUTOSOMES {
     tag "${study_name}/chr${chr}"
-    cpus { params.eagle_threads }
-    memory '32 GB'
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        "${filename.replaceFirst(/_chr.*$/, '')}/stage2/phasing/${filename}"
+    }
 
     input:
     tuple val(study_name), val(chr), path(target_vcf), path(target_vcf_index), path(ref_bcf), path(ref_bcf_index)

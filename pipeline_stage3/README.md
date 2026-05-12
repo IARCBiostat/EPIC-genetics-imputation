@@ -2,49 +2,33 @@
 
 Stage 3 performs post-imputation QC and converts the final study outputs into PLINK2 format.
 
-This stage consumes stage-2 imputed VCFs from `analysis/<STUDY>/stage2/`, annotates rsIDs from dbSNP GRCh38, filters variants, merges chromosomes, performs sample QC, and writes the final study-level PLINK2 dataset to `analysis/<STUDY>/stage3/`.
+This stage consumes stage-2 imputed VCFs from `analysis/<STUDY>/stage2/`, annotates rsIDs from dbSNP GRCh38, filters variants, merges chromosomes, performs sample QC, and writes the final study-level PLINK2 dataset to `analysis/<STUDY>/stage3/final/`.
 
 ## 1. Stage 3 Scope
 
 Stage 3 inputs are:
-
-- `analysis/<STUDY>/stage2/<STUDY>_chr*_GxS.imputed.vcf.gz`
-- `analysis/<STUDY>/stage1/<STUDY>.fam`
+- `analysis/<STUDY>/stage2/` (Imputed VCFs + metrics)
+- `analysis/<STUDY>/stage1/` (Original FAM files)
 - dbSNP GRCh38 VCF + index
 
-Stage 3 outputs are:
+Stage 3 produces a finalized, analysis-ready dataset and a Stage 3-only report. Cross-stage master reports are generated separately with `src/007_report.sh`.
 
-- `analysis/<STUDY>/stage3/<STUDY>.pgen`
-- `analysis/<STUDY>/stage3/<STUDY>.pvar`
-- `analysis/<STUDY>/stage3/<STUDY>.psam`
-
-QC outputs are written beneath:
-
-- `analysis/<STUDY>/stage3/qc/variant_qc/`
-- `analysis/<STUDY>/stage3/qc/sample_qc/`
-
-The stage-3 repository summary is:
-
-- `analysis/stage3-summary.md`
+Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
+- **`final/`**: The definitive, QC-passed PLINK2 files.
+- **`prep_chrom/`**: Intermediate per-chromosome PLINK2 files.
+- **`sample_review/`**: All sample-level QC artifacts (PCA, KING, Het, Sexcheck).
+- **`report/`**: Consolidated dashboards, tables, and figures.
 
 ## 2. How To Run Stage 3
 
-Full run:
-
+Full run (HWE and Ancestry Exclusion are ENABLED by default):
 ```bash
-sbatch src/005_stage3.sh
+sbatch src/006_stage3.sh
 ```
 
-Single study:
-
+To run a specific study:
 ```bash
-sbatch src/005_stage3.sh --study Brea_01_Erneg
-```
-
-To exclude ancestry outliers from the final dataset:
-
-```bash
-sbatch src/005_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
+sbatch src/006_stage3.sh --study Glbd_01
 ```
 
 ## 3. Ordered Execution Inside Stage 3
@@ -53,7 +37,7 @@ Stage 3 is defined in `pipeline_stage3/main.nf` and uses four active modules:
 
 - `prepare_dbsnp.nf`
 - `prepare_chrom.nf`
-- `sample_qc.nf`
+- `sample_review.nf`
 - `finalize_study.nf`
 
 ### 3.1 Step 1: Prepare dbSNP Per Chromosome
@@ -166,7 +150,7 @@ The per-chromosome variant QC table records:
 
 ### 3.8 Step 8: Merge All Chromosomes Per Study
 
-`SAMPLE_QC` begins by merging the chromosome-level PLINK2 files into one study-level dataset:
+`SAMPLE_REVIEW` begins by merging the chromosome-level PLINK2 files into one study-level dataset:
 
 - `<STUDY>_allchr.pgen`
 - `<STUDY>_allchr.pvar`
@@ -198,7 +182,7 @@ These are used because some sample-QC procedures are whole-genome and others are
 
 ### 3.11 Step 11: Run Sample QC
 
-`SAMPLE_QC` performs four sample-QC procedures:
+`SAMPLE_REVIEW` performs four sample-QC procedures:
 
 1. sex check
 2. relatedness estimation / KING table
@@ -252,72 +236,43 @@ If the removal list is non-empty, the study is rewritten after `--remove`.
 
 The final published outputs are:
 
-- `analysis/<STUDY>/stage3/<STUDY>.pgen`
-- `analysis/<STUDY>/stage3/<STUDY>.pvar`
-- `analysis/<STUDY>/stage3/<STUDY>.psam`
+- `analysis/<STUDY>/stage3/final/<STUDY>.pgen`
+- `analysis/<STUDY>/stage3/final/<STUDY>.pvar`
+- `analysis/<STUDY>/stage3/final/<STUDY>.psam`
 
-## 4. Stage-3 Output Structure
+## 4. Stage 3 Reporting
 
-### 4.1 Final Files
+Stage 3 creates a Stage 3-only report at `analysis/<STUDY>/stage3/report/report-stage3.html`.
+This report covers post-imputation filtering and sample review only.
+Cross-stage master reports are generated separately with `src/007_report.sh`.
 
-The main analysis-ready output is a study-level PLINK2 dataset:
+### 4.1 Report Contents
+The Stage 3 report tracks:
+- Variant ID annotation and fallback ID counts.
+- R2/MAF variant filtering counts.
+- HWE variant filtering counts.
+- Sex, relatedness, heterozygosity, and ancestry sample-review counts.
 
-- `<STUDY>.pgen`
-- `<STUDY>.pvar`
-- `<STUDY>.psam`
+### 4.2 Visualizations
+- **Filtering Counts**: Variant and sample counts before and after Stage 3 filtering.
+- **Ancestry Projection**: PC1 vs PC2 plot identifying ancestry outliers.
 
-### 4.2 Variant QC Files
+## 5. Output Conventions
 
-Variant-level QC artefacts are written under:
+### 5.1 Final Dataset (`final/`)
+- `<STUDY>.pgen`, `<STUDY>.pvar`, `<STUDY>.psam`
 
-- `analysis/<STUDY>/stage3/qc/variant_qc/`
+### 5.2 Intermediate Process Assets
+- **`prep_chrom/`**: Per-chromosome PGENs after R2/MAF/HWE filtering.
+- **`sample_review/`**:
+    - `*.eigenvec` / `*.eigenval`: PCA results.
+    - `*.king.kin0`: Kinship coefficients.
+    - `*.het`: Heterozygosity statistics.
+    - `*.sexcheck`: PLINK sex concordance results.
 
-These include:
-
-- `*.variant_qc.tsv`
-- `*.variant_id_map.tsv.gz`
-
-### 4.3 Sample QC Files
-
-Sample-level QC artefacts are written under:
-
-- `analysis/<STUDY>/stage3/qc/sample_qc/`
-
-These include:
-
-- sex check outputs
-- KING outputs
-- heterozygosity outputs
-- PCA outputs
-- outlier ID lists
-- sample-level QC summary tables
-
-## 5. Stage-3 Summary Table Placeholder
-
-Replace `XXX` with the generated values from `analysis/stage3-summary.md` once stage 3 has completed.
-
-| Study | Stage1 Samples | Stage3 Samples | Variants In | Post R2/MAF | Post HWE | Final Variants | rsID | Fallback ID | Sex | Related | Het | Ancestry ID | Ancestry Removed | Total Removed |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Brea_01_Erneg | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Brea_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Clrt_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ecvd_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Glbd_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Inte_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Kidn_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Kidn_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Lung_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Lymp_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Ovar_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Panc_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Panc_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_02 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_03 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Pros_04 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Stom_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
-| Uadt_01 | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX | XXX |
+### 5.3 Reporting Assets (`report/`)
+- **`report-stage3.html`**: The Stage 3-only study dashboard.
+- **`figures/`**: Ancestry PCA plots and QC distributions.
+- **`tables/`**: Consolidated variant and sample metric TSVs.
+- **`flags/`**: Lists of samples flagged for sex mismatches, relatedness, or ancestry.
+- **`manifests/`**: Final variant ID mappings and sample removal lists.

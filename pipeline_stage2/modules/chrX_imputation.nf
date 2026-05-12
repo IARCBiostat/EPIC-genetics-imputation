@@ -2,9 +2,10 @@
 
 process IMPUTE_CHRX {
     tag "${study_name}/chrX"
-    cpus { params.eagle_threads }
-    memory '64 GB'
-    publishDir "${params.outdir}/${study_name}/stage2", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        def study = filename.replaceFirst(/_chr.*$/, '')
+        return "${study}/stage2/${filename}"
+    }
 
     input:
     tuple val(study_name), val(chr), path(target_vcf), path(target_tbi), path(msavs), path(bcfs)
@@ -22,6 +23,23 @@ process IMPUTE_CHRX {
         echo "Eagle binary not found in process environment" >&2
         exit 1
     fi
+
+    prepare_minimac_target() {
+        local block="\$1"
+        local input="phased.\${block}.vcf.gz"
+        local output="phased.\${block}.minimac.vcf.gz"
+
+        if [ "${params.chrx_force_diploid}" = "true" ]; then
+            if ! \$BCFTOOLS_BIN +fixploidy "\${input}" -Oz -o "\${output}" -- -f 2; then
+                echo "Could not normalize chrX \${block} ploidy for Minimac4" >&2
+                return 1
+            fi
+            \$BCFTOOLS_BIN index -f -t "\${output}"
+        else
+            cp "\${input}" "\${output}"
+            cp "\${input}.tbi" "\${output}.tbi"
+        fi
+    }
 
     echo -e "chrX\\t2531036\\t2531036\\tHGSV_248479\\nchrX\\t2777488\\t2777488\\tHGSV_249395" > exclude_ids.bed
     declare -a imputed_blocks=()
@@ -43,7 +61,8 @@ process IMPUTE_CHRX {
             --numThreads ${params.eagle_threads} --outPrefix phased.PAR1; then
             \$BCFTOOLS_BIN index -t phased.PAR1.vcf.gz
 
-            if \$MINIMAC4_BIN 1kGP_panel_chrX.PAR1.msav phased.PAR1.vcf.gz \\
+            if prepare_minimac_target PAR1 && \\
+               \$MINIMAC4_BIN 1kGP_panel_chrX.PAR1.msav phased.PAR1.minimac.vcf.gz \\
                 -o imputed.PAR1.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O vcf.gz; then
                 \$BCFTOOLS_BIN index -t imputed.PAR1.vcf.gz
                 imputed_blocks+=(imputed.PAR1.vcf.gz)
@@ -76,8 +95,9 @@ process IMPUTE_CHRX {
             --numThreads ${params.eagle_threads} --outPrefix phased.nonPAR; then
             \$BCFTOOLS_BIN index -t phased.nonPAR.vcf.gz
 
-            if \$MINIMAC4_BIN 1kGP_panel_chrX.nonPAR.msav phased.nonPAR.vcf.gz \\
-                -o imputed.nonPAR.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O vcf.gz; then
+            if prepare_minimac_target nonPAR && \\
+               \$MINIMAC4_BIN 1kGP_panel_chrX.nonPAR.msav phased.nonPAR.minimac.vcf.gz \\
+                -o imputed.nonPAR.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-ratio ${params.chrx_min_ratio} --min-r2 ${params.min_r2} -O vcf.gz; then
                 \$BCFTOOLS_BIN index -t imputed.nonPAR.vcf.gz
                 imputed_blocks+=(imputed.nonPAR.vcf.gz)
             else
@@ -109,7 +129,8 @@ process IMPUTE_CHRX {
             --numThreads ${params.eagle_threads} --outPrefix phased.PAR2; then
             \$BCFTOOLS_BIN index -t phased.PAR2.vcf.gz
 
-            if \$MINIMAC4_BIN 1kGP_panel_chrX.PAR2.msav phased.PAR2.vcf.gz \\
+            if prepare_minimac_target PAR2 && \\
+               \$MINIMAC4_BIN 1kGP_panel_chrX.PAR2.msav phased.PAR2.minimac.vcf.gz \\
                 -o imputed.PAR2.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O vcf.gz; then
                 \$BCFTOOLS_BIN index -t imputed.PAR2.vcf.gz
                 imputed_blocks+=(imputed.PAR2.vcf.gz)
@@ -151,5 +172,6 @@ process IMPUTE_CHRX {
             imputed.chrX.all.vcf.gz
         \$BCFTOOLS_BIN index -t ${study_name}_chrX_GxS.imputed.vcf.gz
     fi
+
     """
 }

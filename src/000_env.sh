@@ -4,10 +4,10 @@
 
 set -euo pipefail
 
-ENV_NAME="nf_master"
+ENV_NAME="nf_EPIC-genetics"
 
 echo "=========================================="
-echo " Setting up Nextflow Master Environment"
+echo " Setting up EPIC Genetics Nextflow Environment"
 echo "=========================================="
 
 if ! command -v conda >/dev/null 2>&1 && ! command -v mamba >/dev/null 2>&1; then

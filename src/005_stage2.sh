@@ -47,35 +47,54 @@ resolve_project_root() {
 
 abs_path() {
   local target="$1"
-  if [ -d "$target" ]; then
-    (cd "$target" && pwd)
-  else
-    local parent
-    parent="$(dirname "$target")"
-    parent="$(cd "$parent" 2>/dev/null && pwd)"
-    printf '%s/%s\n' "$parent" "$(basename "$target")"
+  local parent
+  local base
+
+  if [[ "$target" = /* ]]; then
+    printf '%s\n' "$target"
+    return 0
   fi
+
+  parent="$(dirname "$target")"
+  base="$(basename "$target")"
+
+  if [ "$parent" = "." ]; then
+    parent="$(pwd)"
+  else
+    parent="$(cd "$parent" 2>/dev/null && pwd)"
+  fi
+
+  printf '%s/%s\n' "$parent" "$base"
 }
 
 print_help() {
   cat <<'EOF'
-Usage: sbatch src/004_pipeline_imputation.sh [options]
+Usage: bash src/005_stage2.sh [options]
 
 Options:
   --profile <name>       Nextflow profile to use (default: slurm)
   --study <list>         Comma-separated study IDs to process (default: all)
+  --chromosomes <list>   Comma-separated chromosomes to process (default: all; e.g. 22)
   --out <dir>            Analysis root where <STUDY>/stage2/ will be written
   --stage1-root <dir>    Root directory containing analysis/<STUDY>/stage1 outputs
   --partition <name>     Slurm partition for internal Nextflow task submissions
+  --queue-size <n>       Nextflow Slurm executor queue size (default: 1000)
   --cache-mode <mode>    Nextflow task cache mode (default: deep)
+  --no-empirical-validation
+                         Disable typed-variant empirical R2 and Dose0 validation
+  --empirical-min-samples <n>
+                         Minimum matched samples for empirical R2 (default: 20)
+  --dose0-min-samples <n>
+                         Minimum observed genotype-0 samples for Dose0 (default: 5)
   --genetic-map-file <file>
                          Eagle genetic map file (default: <ref_1000g_dir>/genetic_map_hg38_withX.txt.gz)
   --no-resume            Disable Nextflow -resume
   -h, --help             Show this help
 
 Examples:
-  sbatch src/004_pipeline_imputation.sh
-  sbatch src/004_pipeline_imputation.sh --study Brea_01_Erneg
+  bash src/005_stage2.sh
+  bash src/005_stage2.sh --study Brea_01_Erneg
+  bash src/005_stage2.sh --study Glbd_01 --chromosomes 22
 EOF
 }
 
@@ -123,6 +142,7 @@ export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
 
 PROFILE="${IMPUTATION_PROFILE:-slurm}"
 STUDY="${IMPUTATION_STUDY:-all}"
+CHROMOSOMES="${IMPUTATION_CHROMOSOMES:-all}"
 OUTDIR="${IMPUTATION_OUTDIR:-${PROJ_ROOT}/analysis}"
 STAGE1_ROOT="${IMPUTATION_STAGE1_ROOT:-${PROJ_ROOT}/analysis}"
 SLURM_PARTITION="${IMPUTATION_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
@@ -134,8 +154,12 @@ CONDA_CACHE_DIR="${IMPUTATION_CONDA_CACHE_DIR:-${PROJ_ROOT}/pipeline_stage2/cond
 CONDA_SOLVER="${IMPUTATION_CONDA_SOLVER:-classic}"
 CONDA_CHANNEL_PRIORITY="${IMPUTATION_CONDA_CHANNEL_PRIORITY:-strict}"
 CACHE_MODE="${IMPUTATION_CACHE_MODE:-deep}"
+EXECUTOR_QUEUE_SIZE="${IMPUTATION_EXECUTOR_QUEUE_SIZE:-1000}"
 SUMMARY_MIN_R2="${IMPUTATION_SUMMARY_MIN_R2:-0.3}"
 SUMMARY_HIGH_QUALITY="${IMPUTATION_SUMMARY_HIGH_QUALITY:-0.8}"
+RUN_EMPIRICAL_VALIDATION="${IMPUTATION_RUN_EMPIRICAL_VALIDATION:-true}"
+EMPIRICAL_MIN_SAMPLES="${IMPUTATION_EMPIRICAL_MIN_SAMPLES:-20}"
+DOSE0_MIN_SAMPLES="${IMPUTATION_DOSE0_MIN_SAMPLES:-5}"
 RESUME=1
 EXTRA_ARGS=()
 
@@ -147,6 +171,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --study)
       STUDY="$2"
+      shift 2
+      ;;
+    --chromosomes|--chromosome|--chr)
+      CHROMOSOMES="$2"
       shift 2
       ;;
     --out|--outdir|-o)
@@ -161,8 +189,28 @@ while [[ $# -gt 0 ]]; do
       SLURM_PARTITION="$2"
       shift 2
       ;;
+    --use-stage1-qc-handoff|--no-use-stage1-qc-handoff)
+      echo "WARNING: stage-2 now always uses analysis/<STUDY>/stage1/<STUDY> handoff files." >&2
+      shift
+      ;;
     --cache-mode)
       CACHE_MODE="$2"
+      shift 2
+      ;;
+    --queue-size)
+      EXECUTOR_QUEUE_SIZE="$2"
+      shift 2
+      ;;
+    --no-empirical-validation)
+      RUN_EMPIRICAL_VALIDATION=false
+      shift
+      ;;
+    --empirical-min-samples)
+      EMPIRICAL_MIN_SAMPLES="$2"
+      shift 2
+      ;;
+    --dose0-min-samples)
+      DOSE0_MIN_SAMPLES="$2"
       shift 2
       ;;
     --ref-1000g-dir)
@@ -194,8 +242,6 @@ done
 
 PIPELINE_DIR="${PROJ_ROOT}/pipeline_stage2"
 PARAMS_FILE="${PIPELINE_DIR}/params.yaml"
-SUMMARY_SCRIPT="${PIPELINE_DIR}/bin/summary.py"
-SUMMARY_OUTPUT="${OUTDIR}/stage2-summary.md"
 OUTDIR="$(abs_path "${OUTDIR}")"
 STAGE1_ROOT="$(abs_path "${STAGE1_ROOT}")"
 REF_1000G_DIR="$(abs_path "${REF_1000G_DIR}")"
@@ -203,7 +249,6 @@ FASTA_REF="$(abs_path "${FASTA_REF}")"
 GENETIC_MAP_FILE="$(abs_path "${GENETIC_MAP_FILE}")"
 WORKDIR="$(abs_path "${WORKDIR}")"
 CONDA_CACHE_DIR="$(abs_path "${CONDA_CACHE_DIR}")"
-SUMMARY_OUTPUT="$(abs_path "${SUMMARY_OUTPUT}")"
 
 export NXF_OPTS="${NXF_OPTS:- -Xms4g -Xmx24g}"
 export NXF_CONDA_CACHEDIR="${NXF_CONDA_CACHEDIR:-${CONDA_CACHE_DIR}}"
@@ -218,6 +263,15 @@ export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
 conda activate nf_EPIC-genetics || true
 unset R_HOME
+if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/java" ]; then
+  export JAVA_HOME="${CONDA_PREFIX}"
+  export JAVA_CMD="${CONDA_PREFIX}/bin/java"
+else
+  unset JAVA_CMD
+  if [ -n "${JAVA_HOME:-}" ] && [ ! -x "${JAVA_HOME}/bin/java" ]; then
+    unset JAVA_HOME
+  fi
+fi
 
 if [ ! -d "${PIPELINE_DIR}" ]; then
   echo "ERROR: Imputation pipeline directory not found: ${PIPELINE_DIR}" >&2
@@ -226,11 +280,6 @@ fi
 
 if [ ! -f "${PARAMS_FILE}" ]; then
   echo "ERROR: Missing params file: ${PARAMS_FILE}" >&2
-  exit 1
-fi
-
-if [ ! -f "${SUMMARY_SCRIPT}" ]; then
-  echo "ERROR: Missing stage-2 summary script: ${SUMMARY_SCRIPT}" >&2
   exit 1
 fi
 
@@ -254,9 +303,25 @@ if [ ! -f "${GENETIC_MAP_FILE}" ]; then
   exit 1
 fi
 
+if ! [[ "${EXECUTOR_QUEUE_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: --queue-size must be a positive integer: ${EXECUTOR_QUEUE_SIZE}" >&2
+  exit 1
+fi
+
+if ! [[ "${EMPIRICAL_MIN_SAMPLES}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: --empirical-min-samples must be a positive integer: ${EMPIRICAL_MIN_SAMPLES}" >&2
+  exit 1
+fi
+
+if ! [[ "${DOSE0_MIN_SAMPLES}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: --dose0-min-samples must be a positive integer: ${DOSE0_MIN_SAMPLES}" >&2
+  exit 1
+fi
+
 check_stage1_study() {
   local study_id="$1"
-  local prefix="${STAGE1_ROOT}/${study_id}/stage1/${study_id}"
+  local prefix
+  prefix="${STAGE1_ROOT}/${study_id}/stage1/${study_id}"
   local ext
   for ext in bed bim fam; do
     if [ ! -f "${prefix}.${ext}" ]; then
@@ -286,7 +351,7 @@ mkdir -p "${WORKDIR}"
 mkdir -p "${CONDA_CACHE_DIR}"
 cd "${PIPELINE_DIR}"
 
-NF_CMD=(nextflow run main.nf -profile "${PROFILE}" -work-dir "${WORKDIR}" -params-file "${PARAMS_FILE}" --outdir "${OUTDIR}" --study "${STUDY}" --stage1_root "${STAGE1_ROOT}" --slurm_partition "${SLURM_PARTITION}" --ref_1000g_dir "${REF_1000G_DIR}" --fasta_ref "${FASTA_REF}" --genetic_map_file "${GENETIC_MAP_FILE}" --cache_mode "${CACHE_MODE}")
+NF_CMD=(nextflow run main.nf -profile "${PROFILE}" -work-dir "${WORKDIR}" -params-file "${PARAMS_FILE}" --outdir "${OUTDIR}" --study "${STUDY}" --chromosomes "${CHROMOSOMES}" --stage1_root "${STAGE1_ROOT}" --slurm_partition "${SLURM_PARTITION}" --executor_queue_size "${EXECUTOR_QUEUE_SIZE}" --ref_1000g_dir "${REF_1000G_DIR}" --fasta_ref "${FASTA_REF}" --genetic_map_file "${GENETIC_MAP_FILE}" --cache_mode "${CACHE_MODE}" --summary_min_r2 "${SUMMARY_MIN_R2}" --summary_high_quality "${SUMMARY_HIGH_QUALITY}" --run_empirical_validation "${RUN_EMPIRICAL_VALIDATION}" --empirical_min_samples "${EMPIRICAL_MIN_SAMPLES}" --dose0_min_samples "${DOSE0_MIN_SAMPLES}")
 if [ "${RESUME}" = "1" ]; then
   NF_CMD+=(-resume)
 fi
@@ -307,6 +372,8 @@ echo "Conda cache:  ${NXF_CONDA_CACHEDIR}"
 echo "Conda solver: ${CONDA_SOLVER}"
 echo "Channel prio: ${CONDA_CHANNEL_PRIORITY}"
 echo "Task cache:   ${CACHE_MODE}"
+echo "Queue size:   ${EXECUTOR_QUEUE_SIZE}"
+echo "Stage1 input: ${STAGE1_ROOT}/<STUDY>/stage1/<STUDY>"
 echo "Ref 1000G:    ${REF_1000G_DIR}"
 echo "FASTA:        ${FASTA_REF}"
 echo "Genetic map:  ${GENETIC_MAP_FILE}"
@@ -315,31 +382,24 @@ echo "BCFtools bin: ${BCFTOOLS_BIN}"
 echo "Eagle bin:    ${EAGLE_BIN}"
 echo "Minimac4 bin: ${MINIMAC4_BIN}"
 echo "Study:        ${STUDY}"
+echo "Chromosomes:  ${CHROMOSOMES}"
+echo "Summary R2:   ${SUMMARY_MIN_R2}"
+echo "High R2:      ${SUMMARY_HIGH_QUALITY}"
+echo "Empirical validation: ${RUN_EMPIRICAL_VALIDATION}"
+echo "Empirical min samples:${EMPIRICAL_MIN_SAMPLES}"
+echo "Dose0 min samples:    ${DOSE0_MIN_SAMPLES}"
 echo "Profile:      ${PROFILE}"
 echo "Partition:    ${SLURM_PARTITION}"
 echo "Analysis root:${OUTDIR}"
 echo "Resume:       ${RESUME}"
+echo "Stage2 summary: ${OUTDIR}/stage2-summary.md"
+echo "Study report:   ${OUTDIR}/<STUDY>/stage2/report/report-stage2.html"
 echo "=========================================="
 printf 'Executing:\n'
 printf '%q ' "${NF_CMD[@]}"
 printf '\n'
 
 "${NF_CMD[@]}"
-
-SUMMARY_CMD=(
-  "${PYTHON3_BIN}" "${SUMMARY_SCRIPT}"
-  --analysis-root "${OUTDIR}"
-  --stage1-root "${STAGE1_ROOT}"
-  --output "${SUMMARY_OUTPUT}"
-  --min-r2-threshold "${SUMMARY_MIN_R2}"
-  --high-quality-threshold "${SUMMARY_HIGH_QUALITY}"
-)
-
-echo
-echo "Generating stage-2 summary..."
-printf '%q ' "${SUMMARY_CMD[@]}"
-printf '\n'
-"${SUMMARY_CMD[@]}"
 
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))

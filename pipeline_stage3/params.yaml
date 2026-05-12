@@ -17,4 +17,4 @@ king_cutoff: 0.0884
 het_sd_threshold: 3.0
 ancestry_pc_count: 10
 ancestry_z_threshold: 6.0
-exclude_ancestry_outliers: false
+exclude_ancestry_outliers: true

@@ -7,13 +7,12 @@
 #output: [project_file]_results.txt
 
 
+##MODULES
+import sys, os, re, datetime, argparse, subprocess
+
 #script written by Manon Knuchel in May 2019 based on the first version developed in May 2018 by Emilie Gerard-Marchant & Benjamin Bourgeois
 
-plink = "plink"
-
-
-##MODULES
-import sys, os, re, datetime, argparse
+plink = os.environ.get("PLINK_BIN", "plink")
 
 #My module:
 #from preProcessing_functions.SNP_research_BM import * #importing all function of the module SNP_research_BM who is in the folder pre-processing_functions
@@ -1512,7 +1511,7 @@ if os.path.exists("./outQC.irem"): #if plink creates a file for people removed
 	liste_ID=""
 
 FSOR.write("\n \n")
-os.system('rm outQC*') #and we delete all the files than plink created
+os.system('rm -f outQC*') #and we delete all the files than plink created
 
 ###Test with 90%###
 FSOR.write(str("---------------- success rate at 90% ---------------------------- \n"))
@@ -1540,7 +1539,7 @@ if os.path.exists("./outQC.irem"):
 	liste_ID=""
 
 FSOR.write("\n \n")
-os.system('rm outQC*')
+os.system('rm -f outQC*')
 
 ###Test with 80%###
 FSOR.write(str("---------------- success rate at 80% ---------------------------- \n"))
@@ -1569,7 +1568,7 @@ if os.path.exists("./outQC.irem"):
 	liste_id=""
 
 FSOR.write("\n \n")
-os.system('rm outQC*')
+os.system('rm -f outQC*')
 
 
 
@@ -1604,7 +1603,7 @@ def impute_sex(compteur_chro_sup_27,chro_pasbeau, nb_people, FSOR):
 				FSOR.write(line)
 
 	FSOR.write("\n\n")
-	os.system('rm outQC*') #and i delete all files create by plink
+	os.system('rm -f outQC*') #and i delete all files create by plink
 
 if (compteur_chro_23 + compteur_chro_24 + compteur_chro_25 + compteur_chro_26) != 0:
 	impute_sex(compteur_chro_sup_27,chro_pasbeau, nb_people, FSOR)
@@ -1618,7 +1617,19 @@ FSOR.write(str("\n********************************************************** \n"
 FSOR.write(str("********************** Genome Version ******************** \n"))
 FSOR.write(str("********************************************************** \n \n"))
 
-os.system("/data/Epic_central_genetics/work/Scripts/Normalisation/Preprocessing/check_RefBuild.sh "+bim+" > temp.txt")
+check_refbuild = os.environ.get(
+	"CHECK_REFBUILD_SH",
+	os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_RefBuild.sh"),
+)
+if os.path.exists(check_refbuild):
+	with open("temp.txt",'w') as genome:
+		check_refbuild_status = subprocess.call(["bash", check_refbuild, bim], stdout=genome)
+	if check_refbuild_status != 0 or not os.path.exists("temp.txt"):
+		with open("temp.txt",'w') as genome:
+			genome.write("Genome build check skipped; command failed: "+check_refbuild+"\n")
+else:
+	with open("temp.txt",'w') as genome:
+		genome.write("Genome build check skipped; script not found: "+check_refbuild+"\n")
 
 with open("temp.txt",'r') as genome:
 	for line in genome:
@@ -1759,4 +1770,4 @@ if print_summary != 'n':
 
 		sum_file.write("\n**********************************************************\n\n")
 
-os.system("rm temp.txt")
+os.system("rm -f temp.txt")

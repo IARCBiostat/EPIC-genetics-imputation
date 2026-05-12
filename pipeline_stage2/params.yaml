@@ -1,13 +1,13 @@
 # Input bounds
 study: "all"
+chromosomes: "all"
 stage1_root: "../analysis"
 slurm_partition: "low_p"
+executor_queue_size: 1000
 
 # General BMRC Imputation Limits
 min_r2: 0.3
 minimac_batch_size: 900
-eagle_threads: 8
-minimac_threads: 8
 
 # References
 ref_1000g_dir: "../data/reference/1000G"
@@ -18,3 +18,9 @@ genetic_map_file: "../data/reference/eagle/genetic_map_hg38_withX.txt.gz"
 run_preprocessing: true
 run_phasing: true
 run_imputation: true
+run_reporting: true
+run_empirical_validation: true
+empirical_min_samples: 20
+dose0_min_samples: 5
+summary_min_r2: 0.3
+summary_high_quality: 0.8

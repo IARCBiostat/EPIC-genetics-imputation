@@ -1,11 +1,11 @@
 process FINALIZE_STUDY {
     tag "${study_name}"
-    cpus 2
-    memory '16 GB'
-    publishDir "${params.outdir}/${study_name}/stage3", mode: 'copy', pattern: "${study_name}.p*", overwrite: true
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        "${study_name}/stage3/final/${filename}"
+    }
 
     input:
-    tuple val(study_name), path(merged_pgen), path(merged_pvar), path(merged_psam), path(remove_list), path(sample_qc_tsv)
+    tuple val(study_name), path(merged_pgen), path(merged_pvar), path(merged_psam), path(remove_list), path(sample_review_tsv)
 
     output:
     tuple val(study_name), path("${study_name}.pgen"), path("${study_name}.pvar"), path("${study_name}.psam")

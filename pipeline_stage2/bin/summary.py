@@ -2,13 +2,20 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 
+BIN_DIR = Path(__file__).resolve().parent
+if str(BIN_DIR) not in sys.path:
+    sys.path.insert(0, str(BIN_DIR))
+
+from common import parse_studies  # noqa: E402
 EXPECTED_CHROMS = [str(chrom) for chrom in range(1, 23)] + ["X"]
 QUALITY_KEYS = ("R2", "INFO", "DR2", "ER2")
 RSID_RE = re.compile(r"^rs[0-9]+$", re.IGNORECASE)
@@ -85,11 +92,10 @@ class StudySummary:
 
 
 def parse_args() -> argparse.Namespace:
-    repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="Write a markdown summary of stage-2 imputation outputs.")
     parser.add_argument(
         "--analysis-root",
-        default=str(repo_root / "analysis"),
+        default=str(REPO_ROOT / "analysis"),
         help="Root directory containing analysis/<STUDY>/stage1 and stage2 outputs.",
     )
     parser.add_argument(
@@ -99,13 +105,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default=str(repo_root / "analysis" / "stage2-summary.md"),
+        default=str(REPO_ROOT / "analysis" / "stage2-summary.md"),
         help="Path to the markdown summary to write.",
     )
     parser.add_argument(
         "--studies",
         default="all",
         help="Comma-separated study IDs to summarize. Default: all studies found under the stage-1 root.",
+    )
+    parser.add_argument(
+        "--chromosomes",
+        default="all",
+        help="Comma-separated chromosomes to summarize. Default: all chromosomes present in stage 1.",
     )
     parser.add_argument(
         "--min-r2-threshold",
@@ -120,6 +131,13 @@ def parse_args() -> argparse.Namespace:
         help="High-confidence imputation quality threshold.",
     )
     return parser.parse_args()
+
+
+def project_relative(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def fmt_int(value: int | None) -> str:
@@ -144,16 +162,23 @@ def fmt_percent(numerator: int, denominator: int) -> str:
     return f"{(100.0 * numerator / denominator):.1f}%"
 
 
-def parse_study_ids(stage1_root: Path, study_arg: str) -> list[str]:
-    if study_arg != "all":
-        return sorted({item.strip() for item in study_arg.split(",") if item.strip()})
+def parse_study_ids(analysis_root: Path, study_arg: str) -> list[str]:
+    return parse_studies(study_arg, analysis_root)
 
-    study_ids = {
-        path.parent.name
-        for path in stage1_root.glob("*/stage1")
-        if path.is_dir()
-    }
-    return sorted(study_ids)
+
+def parse_chromosomes(chromosome_arg: str) -> list[str] | None:
+    if chromosome_arg == "all":
+        return None
+    chroms = []
+    for item in chromosome_arg.split(","):
+        chrom = item.strip().replace("chr", "")
+        if not chrom:
+            continue
+        chrom = "X" if chrom == "23" else chrom
+        if chrom not in EXPECTED_CHROMS:
+            raise SystemExit(f"Unsupported chromosome for summary: {item}")
+        chroms.append(chrom)
+    return chroms
 
 
 def count_stage1_samples(fam_path: Path) -> int | None:
@@ -315,17 +340,94 @@ def scan_vcf(
     )
 
 
+def int_from_metrics(value: str | None, default: int = 0) -> int:
+    if value in {None, ""}:
+        return default
+    return int(value)
+
+
+def optional_int_from_metrics(value: str | None) -> int | None:
+    if value in {None, ""}:
+        return None
+    return int(value)
+
+
+def float_from_metrics(value: str | None) -> float | None:
+    if value in {None, ""}:
+        return None
+    return float(value)
+
+
+def metrics_threshold_matches(value: str | None, expected: float) -> bool:
+    if value in {None, ""}:
+        return False
+    try:
+        return abs(float(value) - expected) < 1e-12
+    except ValueError:
+        return False
+
+
+def read_staged_metrics(
+    metrics_path: Path,
+    min_r2_threshold: float,
+    high_quality_threshold: float,
+) -> VcfScan | None:
+    if not metrics_path.exists():
+        return None
+
+    with metrics_path.open(newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        row = next(reader, None)
+
+    if not row:
+        return None
+
+    if not metrics_threshold_matches(row.get("min_r2_threshold"), min_r2_threshold):
+        return None
+    if not metrics_threshold_matches(row.get("high_quality_threshold"), high_quality_threshold):
+        return None
+
+    try:
+        return VcfScan(
+            sample_count=optional_int_from_metrics(row.get("sample_count")),
+            variant_count=int_from_metrics(row.get("variant_count")),
+            quality_tag_counts={
+                "R2": int_from_metrics(row.get("quality_tag_R2")),
+                "INFO": int_from_metrics(row.get("quality_tag_INFO")),
+                "DR2": int_from_metrics(row.get("quality_tag_DR2")),
+                "ER2": int_from_metrics(row.get("quality_tag_ER2")),
+            },
+            quality_scored_variants=int_from_metrics(row.get("quality_scored_variants")),
+            quality_sum=float(row.get("quality_sum") or 0.0),
+            quality_min=float_from_metrics(row.get("quality_min")),
+            quality_max=float_from_metrics(row.get("quality_max")),
+            quality_ge_min=int_from_metrics(row.get("quality_ge_min")),
+            quality_ge_high=int_from_metrics(row.get("quality_ge_high")),
+            id_style_counts={
+                "rsID": int_from_metrics(row.get("id_rsID")),
+                "chr:pos:REF:ALT": int_from_metrics(row.get("id_chrpos")),
+                "other": int_from_metrics(row.get("id_other")),
+                "missing": int_from_metrics(row.get("id_missing")),
+            },
+        )
+    except ValueError:
+        return None
+
+
 def collect_study_summary(
     analysis_root: Path,
     stage1_root: Path,
     study_id: str,
     min_r2_threshold: float,
     high_quality_threshold: float,
+    selected_chroms: list[str] | None,
 ) -> StudySummary:
     stage1_fam = stage1_root / study_id / "stage1" / f"{study_id}.fam"
     stage1_bim = stage1_root / study_id / "stage1" / f"{study_id}.bim"
     stage2_dir = analysis_root / study_id / "stage2"
     expected_chroms = detect_stage1_chroms(stage1_bim)
+    if selected_chroms is not None:
+        expected_chroms = [chrom for chrom in expected_chroms if chrom in selected_chroms]
 
     stage1_samples = count_stage1_samples(stage1_fam)
     stage2_samples: int | None = None
@@ -359,12 +461,22 @@ def collect_study_summary(
         if tbi_path.exists():
             chr_indexes += 1
 
-        scan = scan_vcf(
-            vcf_path,
+        metrics_path = stage2_dir / "report" / "tables" / f"chr{chrom}.imputation_metrics.tsv"
+        legacy_metrics_path = stage2_dir / "report" / "tables" / f"{study_id}_chr{chrom}.imputation_metrics.tsv"
+        if not metrics_path.exists() and legacy_metrics_path.exists():
+            metrics_path = legacy_metrics_path
+        scan = read_staged_metrics(
+            metrics_path,
             min_r2_threshold=min_r2_threshold,
             high_quality_threshold=high_quality_threshold,
-            id_sample_limit=remaining_id_samples,
         )
+        if scan is None:
+            scan = scan_vcf(
+                vcf_path,
+                min_r2_threshold=min_r2_threshold,
+                high_quality_threshold=high_quality_threshold,
+                id_sample_limit=remaining_id_samples,
+            )
 
         if stage2_samples is None:
             stage2_samples = scan.sample_count
@@ -437,13 +549,13 @@ def build_markdown(
     lines: list[str] = []
     lines.append("# Stage 2 Summary\n\n")
     lines.append(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
-    lines.append(f"Analysis root: `{analysis_root}`\n\n")
-    lines.append(f"Stage-1 root: `{stage1_root}`\n\n")
+    lines.append(f"Analysis root: `{project_relative(analysis_root)}`\n\n")
+    lines.append(f"Stage-1 root: `{project_relative(stage1_root)}`\n\n")
 
     lines.append("## Overview\n\n")
-    lines.append(f"- Expected studies: {len(summaries)}\n")
-    lines.append(f"- Complete stage-2 outputs: {len(complete)}\n")
-    lines.append(f"- Incomplete or missing studies: {len(incomplete)}\n")
+    lines.append(f"- Expected studies: {len(summaries):,}\n")
+    lines.append(f"- Complete stage-2 outputs: {len(complete):,}\n")
+    lines.append(f"- Incomplete or missing studies: {len(incomplete):,}\n")
     lines.append(f"- Total imputed variants across complete studies: {total_variants:,}\n")
     lines.append(
         f"- Variants meeting quality threshold (`>= {min_r2_threshold}`) across complete studies: "
@@ -509,6 +621,7 @@ def build_markdown(
     lines.append("- `Chr Files` expects the chromosomes present in the stage-1 `.bim`; studies with no chrX in stage 1 are assessed on autosomes only.\n")
     lines.append("- `Indexed` counts `.tbi` files present beside the final imputed VCFs.\n")
     lines.append("- `Variants` are summed across the final imputed stage-2 VCFs.\n")
+    lines.append("- Per-chromosome counts are read from `analysis/<STUDY>/stage2/report/tables/*imputation_metrics.tsv` when present; missing or threshold-mismatched metrics fall back to a direct VCF scan.\n")
     lines.append(f"- `>= {min_r2_threshold}` counts variants meeting the pipeline-quality threshold.\n")
     lines.append(f"- `>= {high_quality_threshold}` counts variants in a higher-confidence quality tier.\n")
     lines.append("- `Mean Qual` is the mean imputation-quality value across scored variants.\n")
@@ -524,7 +637,8 @@ def main() -> None:
     stage1_root = Path(args.stage1_root).resolve() if args.stage1_root else analysis_root
     output_path = Path(args.output).resolve()
 
-    study_ids = parse_study_ids(stage1_root, args.studies)
+    study_ids = parse_study_ids(analysis_root, args.studies)
+    selected_chroms = parse_chromosomes(args.chromosomes)
     summaries = [
         collect_study_summary(
             analysis_root,
@@ -532,6 +646,7 @@ def main() -> None:
             study_id,
             min_r2_threshold=args.min_r2_threshold,
             high_quality_threshold=args.high_quality_threshold,
+            selected_chroms=selected_chroms,
         )
         for study_id in study_ids
     ]
