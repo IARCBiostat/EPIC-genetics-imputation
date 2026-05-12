@@ -14,7 +14,6 @@ workflow {
 
     def included_studies = params.study == 'all' ? [] : params.study.split(',').collect { it.trim() }
     def all_chroms = (1..22).collect { it.toString() } + ['X']
-    def expected_chrom_count = all_chroms.size()
 
     ch_chroms = Channel.fromList(all_chroms)
 
@@ -52,7 +51,7 @@ workflow {
         .map { study, chr, pgen, pvar, psam, stats, id_map ->
             tuple(study, [chr: chr, pgen: pgen, pvar: pvar, psam: psam, stats: stats, id_map: id_map])
         }
-        .groupTuple(size: expected_chrom_count)
+        .groupTuple()
         .map { study, entries ->
             def ordered = entries.sort { a, b ->
                 chromSortKey(a.chr as String) <=> chromSortKey(b.chr as String)

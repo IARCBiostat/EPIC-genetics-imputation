@@ -21,6 +21,22 @@ is_repo_root() {
   [ -d "${candidate}/analysis" ]
 }
 
+source_root_env() {
+  local root="$1"
+  local env_file="${root}/.env"
+
+  if [ ! -f "$env_file" ]; then
+    echo "ERROR: Root environment file not found: ${env_file}" >&2
+    echo "       Create ${env_file}; stage-specific .env files are no longer supported." >&2
+    return 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+}
+
 resolve_project_root() {
   local candidates=()
   local candidate
@@ -98,8 +114,12 @@ Examples:
 EOF
 }
 
+PROJ_ROOT="$(resolve_project_root)"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+source_root_env "$PROJ_ROOT"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+
 if [ -z "${SLURM_JOB_ID:-}" ]; then
-  PROJ_ROOT="$(resolve_project_root)"
   mkdir -p "${PROJ_ROOT}/src/logs"
   cd "$PROJ_ROOT"
 
@@ -123,22 +143,6 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
 fi
 
 start_time=$(date +%s)
-
-for env_file in ".env" \
-                "${DEFAULT_PROJ_ROOT}/.env" \
-                "${SCRIPT_DIR}/../.env" \
-                "${DEFAULT_PROJ_ROOT}/pipeline_stage2/.env" \
-                "${SCRIPT_DIR}/../pipeline_stage2/.env"; do
-  if [ -f "$env_file" ]; then
-    set -a
-    source "$env_file"
-    set +a
-    break
-  fi
-done
-
-PROJ_ROOT="$(resolve_project_root)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
 
 PROFILE="${IMPUTATION_PROFILE:-slurm}"
 STUDY="${IMPUTATION_STUDY:-all}"

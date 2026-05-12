@@ -12,17 +12,22 @@ trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
 start_time=$(date +%s)
 
 # ── Environment ────────────────────────────────────────────────────────────────
-for env_file in ".env" \
-                "$(dirname -- "${BASH_SOURCE[0]:-$0}")/../.env" \
-                "$(dirname -- "${BASH_SOURCE[0]:-$0}")/../pipeline_stage2/.env"; do
-  if [ -f "$env_file" ]; then
-    set -a; source "$env_file"; set +a
-    break
-  fi
-done
+SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PROJ_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+ENV_FILE="${PROJ_ROOT}/.env"
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: Root environment file not found: ${ENV_FILE}" >&2
+  echo "       Create ${ENV_FILE}; stage-specific .env files are no longer supported." >&2
+  exit 1
+fi
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
 
-PROJ_ROOT="${GENETICS_PROJECT_ROOT:-$(pwd)}"
-TOOLS_DIR="${PROJ_ROOT}/tools"
+TOOLS_DIR="${TOOLS_DIR:-${PROJ_ROOT}/tools}"
 IMG_DIR="${TOOLS_DIR}/singularity_images"
 BIN_DIR="${TOOLS_DIR}/bin"
 SRC_DIR="${TOOLS_DIR}/src"

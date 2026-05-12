@@ -21,6 +21,22 @@ is_repo_root() {
   [ -d "${candidate}/analysis" ]
 }
 
+source_root_env() {
+  local root="$1"
+  local env_file="${root}/.env"
+
+  if [ ! -f "$env_file" ]; then
+    echo "ERROR: Root environment file not found: ${env_file}" >&2
+    echo "       Create ${env_file}; stage-specific .env files are no longer supported." >&2
+    return 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+}
+
 resolve_project_root() {
   local candidates=()
   local candidate
@@ -124,8 +140,12 @@ Options:
 EOF
 }
 
+PROJ_ROOT="$(resolve_project_root)"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+source_root_env "$PROJ_ROOT"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+
 if [ -z "${SLURM_JOB_ID:-}" ]; then
-  PROJ_ROOT="$(resolve_project_root)"
   mkdir -p "${PROJ_ROOT}/src/logs"
   cd "$PROJ_ROOT"
 
@@ -150,22 +170,6 @@ fi
 
 start_time=$(date +%s)
 
-for env_file in ".env" \
-                "${DEFAULT_PROJ_ROOT}/.env" \
-                "${SCRIPT_DIR}/../.env" \
-                "${DEFAULT_PROJ_ROOT}/pipeline_stage3/.env" \
-                "${SCRIPT_DIR}/../pipeline_stage3/.env"; do
-  if [ -f "$env_file" ]; then
-    set -a
-    source "$env_file"
-    set +a
-    break
-  fi
-done
-
-PROJ_ROOT="$(resolve_project_root)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
-
 PROFILE="${STAGE3_PROFILE:-slurm}"
 STUDY="${STAGE3_STUDY:-all}"
 OUTDIR="${STAGE3_OUTDIR:-${PROJ_ROOT}/analysis}"
@@ -176,7 +180,7 @@ WORKDIR="${STAGE3_WORKDIR:-${PROJ_ROOT}/pipeline_stage3/work}"
 CONDA_CACHE_DIR="${STAGE3_CONDA_CACHE_DIR:-${PROJ_ROOT}/pipeline_stage3/conda}"
 CONDA_SOLVER="${STAGE3_CONDA_SOLVER:-classic}"
 CONDA_CHANNEL_PRIORITY="${STAGE3_CONDA_CHANNEL_PRIORITY:-strict}"
-CACHE_MODE="${STAGE3_CACHE_MODE:-deep}"
+CACHE_MODE="${STAGE3_CACHE_MODE:-lenient}"
 MIN_R2="${STAGE3_MIN_R2:-0.3}"
 MAF="${STAGE3_MAF:-0.01}"
 RUN_HWE="${STAGE3_RUN_HWE:-true}"
