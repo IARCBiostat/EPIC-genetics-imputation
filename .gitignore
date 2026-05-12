@@ -5,6 +5,7 @@
 # Allow documentation
 !/README.md
 !/walkthrough.md
+!/.env.example
 
 # Allow core logic directories
 !/pipeline_stage1/
@@ -16,15 +17,12 @@
 /src/test/
 /src/logs/
 /pipeline_stage1/.nextflow_work/
-/pipeline_stage1/.env
 /pipeline_stage1/work/
-/pipeline_stage2/.env
 /pipeline_stage2/work/
 /pipeline_stage2/conda/
 /pipeline_stage2/logs/
 /pipeline_stage2/.nextflow/
 /pipeline_stage2/.nextflow.log*
-/pipeline_stage3/.env
 /pipeline_stage3/work/
 /pipeline_stage3/conda/
 /pipeline_stage3/.nextflow/

@@ -1,18 +1,10 @@
 # EPIC Genetics Pipeline
 
-This repository contains the EPIC genetics imputation workflow. The workflow is composed of 3-stages:
+This repository contains the EPIC genetics imputation pipeline. The pipeline is composed of 3-stages, each stage uses an independent Neztflow workflow:
 
 1. `pipeline_stage1/`: study-specific raw [genotype](https://en.wikipedia.org/wiki/Genotype) preprocessing and liftover to hg38
 2. `pipeline_stage2/`: [phasing](https://en.wikipedia.org/wiki/Haplotype_estimation) and [imputation](https://en.wikipedia.org/wiki/Imputation_(genetics)) against the [1000 Genomes Project](https://en.wikipedia.org/wiki/1000_Genomes_Project) high-coverage GRCh38 reference
 3. `pipeline_stage3/`: post-imputation QC, [rsID](https://www.ncbi.nlm.nih.gov/snp/docs/RefSNP_about/) annotation, and conversion to PLINK2 format
-
-The active Slurm submission wrappers are:
-
-- `src/004_stage1.sh`
-- `src/005_stage2.sh`
-- `src/006_stage3.sh`
-- `src/007_report.sh`
-- `src/008_finalise.sh`
 
 Stage-specific documentation lives in:
 
@@ -20,18 +12,13 @@ Stage-specific documentation lives in:
 - [pipeline_stage2/README.md](pipeline_stage2/README.md)
 - [pipeline_stage3/README.md](pipeline_stage3/README.md)
 
-Large runtime data and server tool installations are not stored in this repository.
-The server environment must provide the source genotype data, reference data, and
-external tools via the paths configured in the `src/` wrappers and `.env` files.
-For Stage 1 liftover, set `STAGE1_TRIPLE_LIFTOVER_DIR` when the server
-`triple-liftOver` installation is not at `tools/triple-liftOver`.
-
+Some code/scripts/functions and processes used in this pipeline are direct copies or adaptations from prior EPIC genetics pipelines by: Joshua Atkins, Marie Breeur, Aurelie Gabriel, Emilie Gerard-Marchant, Manon Knuchel...
 
 ## Stage 1: Study Harmonization and Genome-Build Standardization
 
 - Directory: `pipeline_stage1/`
 - Main purpose: Convert each raw study into a harmonized hg38 PLINK handoff
-- Primary input:  Archive-style raw study PLINK data plus manifests and EPIC ID linkage files
+- Primary input:  raw study data plus manifests and EPIC ID linkage files
 - Primary output: `analysis/<STUDY>/stage1/<STUDY>.bed/.bim/.fam`
 - Submission script: `src/004_stage1.sh` 
 
@@ -39,10 +26,10 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 #### What this stage does:
 
-- harmonizes sample identifiers to the EPIC identifier system
-- applies study-specific preprocessing such as BIM sorting, AB-allele translation, sex-chromosome handling, and build-specific logic
-- standardizes all studies onto GRCh38
-- writes one consistent study-level PLINK dataset for the next stage
+1. harmonizes sample identifiers to the EPIC identifier system
+2. applies study-specific preprocessing such as BIM sorting, AB-allele translation, sex-chromosome handling, and build-specific logic
+3. standardizes all studies onto GRCh38
+4. writes one consistent study-level PLINK dataset for the next stage
 
 #### Data used:
 
@@ -61,9 +48,9 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 - Submission script: `src/005_stage2.sh` 
 
 #### What this stage does:
-- performs phasing
-- performs imputation
-- generates per-study imputation reports and a cohort summary
+1. performs phasing
+2. performs imputation
+3. generates per-study phasing and imputation reports
 
 ### Phasing
 
@@ -121,14 +108,15 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 - Primary output: `analysis/<STUDY>/stage3/final/<STUDY>.pgen/.pvar/.psam`
 - Submission script: `src/006_stage3.sh`
 
-#### What this stage does:
-
 Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-ready study-level PLINK2 dataset. It combines four linked operations into one workflow:
+
+#### What this stage does:
 
 1. variant identifier standardization
 2. variant-level QC (including HWE)
 3. conversion to PLINK2 format
-4. sample-level QC (Ancestry, Relatedness, Heterozygosity)
+4. sample-level QC (sex, ancestry, relatedness, heterozygosity)
+5. generate per-study QC reports
 
 #### Why:
 
@@ -165,18 +153,22 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-r
 
 ## Output
 
-Repository-level outputs are organized as:
+All outputs, including intermediate stages and reports, are organized as:
 
 - `analysis/<STUDY>/stage1/`
 - `analysis/<STUDY>/stage2/`
-- `analysis/<STUDY>/stage3/final/`
-- `analysis/<STUDY>/stage3/report/`
-- `analysis/stage1-summary.md`
-- `analysis/stage2-summary.md`
-- `analysis/stage3-summary.md`
-- `final_<YYYY-MM-DD>/`
+- `analysis/<STUDY>/stage3/`
+- `analysis/<STAGE>-summary.md`
+	- provides an overview of metrics for all studies for that stage
+- `analysis/<STAGE>-pipeline_info/`
+	- provides the Nextflow trace and report for that stage
 
-Temporary and workflow-specific files are kept inside the stage directories:
+The final study files and reports are in:
+
+- `final_<YYYY-MM-DD>/<STUDY>.[pgen/psam/pvar]`
+- `final_<YYYY-MM-DD>/<STUDY>.html`
+
+Temporary files and cache are kept inside the stage directories:
 
 - `pipeline_stage1/work/`
 - `pipeline_stage2/work/`
@@ -184,44 +176,93 @@ Temporary and workflow-specific files are kept inside the stage directories:
 
 ## How To Run 
 
-Prepare Tools And Reference Files
+### 0: `.env` and `tools/`
+
+You must first ensure that you have created a `.env` file at root, see: [.env.example](.env.example)
+
+You must set-up a minimal `conda` environment:
 
 ```bash
-bash src/001_data-genetics.sh
+bash src/000_env.sh
 ```
 
-Run Stages Sequentially
+You must download and compile all tools which are not available through `conda`; we run this as a job as it takes a while:
 
-Full run:
+```bash
+sbatch src/000_tools.sh
+```
+
+### 1: prepare study data
+
+We create a copy of all required EPIC genetics data files:
+
+```bash
+sbatch src/001_data-genetics.sh
+```
+
+### 2: download reference data
+
+We download all of the required reference data:
+1. 1000 Genomes NYGC 2022 high-coverage VCFs (GRCh38)
+2. Eagle hg38 recombination map with chrX
+3. dbSNP GRCh38 VCF
+4. Annovar hg38 Database
+
+```bash
+bash src/002_data-reference.sh
+```
+
+### 3: prepare EPIC data
+
+We need to create a reference file which provides information on sex and case status for each sample as this is not provided in the raw genetics data:
+
+```bash
+bash src/003_data-epic.sh
+```
+
+### 4: stage1, stage2, and stage3
+
+We can only run `stage1`, `stage2`, and `stage3` sequentially as `stage2`, and `stage3` are dependent upon the prior stages handoff data. We use the same `sbatch src/00*_stage*.sh` command for each.
+
+We can run a `stage` for all studies simultaneously:
 
 ```bash
 sbatch src/004_stage1.sh
-sbatch src/005_stage2.sh
-sbatch src/006_stage3.sh
-bash src/007_report.sh
-bash src/008_finalise.sh
 ```
 
-To exclude ancestry outliers during stage 3 finalization (now enabled by default):
+Before progressing to `stage2` and `stage3` and from `stage3` to finalisation, you must look at the `stage1-summary.md`, `stage2-summary.md`, `stage3-summary.md` and `stage2` and `stage3` reports to check that the studies have completed and the pre-QC, phasing and imputation, and post-QC are good.
+
+### 5: report and finalising
+
+With all stages finished we can make final study specific reports to be packaged alongside the genetics data:
 
 ```bash
-sbatch src/006_stage3.sh
+sbatch src/007_report.sh
 ```
 
-
-Test/Single study:
+We can then create a finalised repositroy with all data and reports ready for downstream analysis and dissemination:
 
 ```bash
-STAGE1_SCRIPTS=process_brea_01_erneg.py sbatch src/004_stage1.sh
-sbatch src/005_stage2.sh --study Brea_01_Erneg
-sbatch src/006_stage3.sh --study Brea_01_Erneg
-bash src/007_report.sh --study Brea_01_Erneg
-bash src/008_finalise.sh --study Brea_01_Erneg
+sbatch src/008_finalise.sh
 ```
-To exclude ancestry outliers during stage 3 finalization:
+
+### testing/other
+
+We can perform a test across a single study if needed; we use `Glbd_01` for testing as its the smallest study:
+
 
 ```bash
-sbatch src/006_stage3.sh --study Brea_01_Erneg --exclude-ancestry-outliers
+STAGE1_SCRIPTS=process_glbd_01_erneg.py sbatch src/004_stage1.sh
+sbatch src/005_stage2.sh --study Glbd_01
+sbatch src/006_stage3.sh --study Glbd_01
+bash src/007_report.sh --study Glbd_01
+bash src/008_finalise.sh --study Glbd_01
+```
+
+We can exclude ancestry outliers during `stage3` if needed finalization:
+
+```bash
+sbatch src/006_stage3.sh --exclude-ancestry-outliers
 ```
 
 ## Methods And Thresholds Summary

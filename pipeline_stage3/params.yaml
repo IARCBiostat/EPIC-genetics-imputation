@@ -4,7 +4,7 @@ stage2_root: ../analysis
 study: all
 dbsnp_vcf: ""
 dbsnp_tbi: ""
-cache_mode: deep
+cache_mode: lenient
 slurm_partition: low_p
 
 min_r2: 0.3

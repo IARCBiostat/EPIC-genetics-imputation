@@ -16,7 +16,7 @@
 #
 # cd /data/Epic/subprojects/Genetics/work
 # set -a
-# source pipeline_stage1/.env
+# source .env
 # set +a
 # python3 /data/Epic/subprojects/Genetics/work/pipeline_stage1/scripts/process_brea_01_erneg.py \
 #   --data-root "${STAGE1_DATA_ROOT}" \
@@ -36,7 +36,23 @@ is_repo_root() {
   local candidate="$1"
   [ -d "${candidate}/src" ] && \
   [ -d "${candidate}/pipeline_stage1/scripts" ] && \
-  [ -d "${candidate}/tools" ]
+  [ -f "${candidate}/pipeline_stage1/main.nf" ]
+}
+
+source_root_env() {
+  local root="$1"
+  local env_file="${root}/.env"
+
+  if [ ! -f "$env_file" ]; then
+    echo "ERROR: Root environment file not found: ${env_file}" >&2
+    echo "       Create ${env_file}; stage-specific .env files are no longer supported." >&2
+    return 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
 }
 
 resolve_project_root() {
@@ -105,8 +121,12 @@ resolve_epic_file() {
   return 1
 }
 
+PROJ_ROOT="$(resolve_project_root)"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+source_root_env "$PROJ_ROOT"
+export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+
 if [ -z "${SLURM_JOB_ID:-}" ]; then
-  PROJ_ROOT="$(resolve_project_root)"
   mkdir -p "${PROJ_ROOT}/src/logs"
   cd "$PROJ_ROOT"
 
@@ -130,25 +150,6 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
 fi
 
 start_time=$(date +%s)
-
-# Robust environment sourcing
-for env_file in "${DEFAULT_PROJ_ROOT}/pipeline_stage1/.env" \
-                "${SCRIPT_DIR}/../pipeline_stage1/.env" \
-                ".env" \
-                "${DEFAULT_PROJ_ROOT}/.env" \
-                "${SCRIPT_DIR}/../.env" \
-                "${DEFAULT_PROJ_ROOT}/pipeline_stage2/.env" \
-                "${SCRIPT_DIR}/../pipeline_stage2/.env"; do
-  if [ -f "$env_file" ]; then
-    set -a
-    source "$env_file"
-    set +a
-    break
-  fi
-done
-
-PROJ_ROOT="$(resolve_project_root)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
 
 if [ -n "${GENETICS_TOOLS_BIN:-}" ]; then
   export PATH="${GENETICS_TOOLS_BIN}:${PATH}"
