@@ -3,14 +3,29 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TextIO
+from typing import Iterator, TextIO
 
 
-def open_text(path: Path, mode: str) -> TextIO:
-    if path.suffix == ".gz":
-        return gzip.open(path, mode + "t")
-    return path.open(mode)
+@contextmanager
+def open_text(path: str, mode: str) -> Iterator[TextIO]:
+    if path == "-":
+        if "r" in mode:
+            yield sys.stdin
+        else:
+            yield sys.stdout
+        return
+
+    file_path = Path(path)
+    if file_path.suffix == ".gz":
+        with gzip.open(file_path, mode + "t") as handle:
+            yield handle
+        return
+
+    with file_path.open(mode) as handle:
+        yield handle
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,13 +38,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    input_path = Path(args.input)
-    output_path = Path(args.output)
-    mapping_path = Path(args.mapping_output)
-
     seen_ids: set[str] = set()
 
-    with open_text(input_path, "r") as src, open_text(output_path, "w") as dst, open_text(mapping_path, "w") as mapping:
+    with open_text(args.input, "r") as src, open_text(args.output, "w") as dst, open_text(args.mapping_output, "w") as mapping:
         mapping.write("CHROM\tPOS\tREF\tALT\tORIGINAL_ID\tFINAL_ID\tID_SOURCE\n")
 
         for line in src:

@@ -128,6 +128,14 @@ Options:
   --dbsnp-vcf <file>                dbSNP GRCh38 VCF for rsID annotation
   --dbsnp-tbi <file>                dbSNP GRCh38 VCF index
   --partition <name>                Slurm partition for internal Nextflow task submissions
+  --filter-chrom-time <duration>    Wall time for per-chromosome R2/MAF filter jobs (default: 24h)
+  --annotate-chrom-time <duration>  Wall time for per-chromosome rsID annotation jobs (default: 72h)
+  --import-chrom-time <duration>    Wall time for per-chromosome PLINK2 PGEN import jobs (default: 72h)
+  --sample-review-time <duration>   Wall time for each per-study sample-review subprocess (default: 48h)
+  --prune-autosomes-time <duration> Wall time for per-study PRUNE_AUTOSOMES jobs (default: 72h)
+  --finalize-study-time <duration>  Wall time for per-study FINALIZE_STUDY jobs (default: 48h)
+  --publish-intermediate-plink      Copy intermediate PLINK/PGEN/BED files into analysis output
+  --no-publish-intermediate-plink   Do not copy intermediate PLINK/PGEN/BED files (default)
   --min-r2 <value>                  Minimum imputation R2 (default: 0.3)
   --maf <value>                     Minimum MAF (default: 0.01)
   --hwe-p <value>                   HWE p-value threshold (default: 0.000005)
@@ -176,6 +184,13 @@ OUTDIR="${STAGE3_OUTDIR:-${PROJ_ROOT}/analysis}"
 STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${PROJ_ROOT}/analysis}"
 STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${PROJ_ROOT}/analysis}"
 SLURM_PARTITION="${STAGE3_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
+FILTER_CHROM_TIME="${STAGE3_FILTER_CHROM_TIME:-24h}"
+ANNOTATE_CHROM_TIME="${STAGE3_ANNOTATE_CHROM_TIME:-72h}"
+IMPORT_CHROM_TIME="${STAGE3_IMPORT_CHROM_TIME:-72h}"
+SAMPLE_REVIEW_TIME="${STAGE3_SAMPLE_REVIEW_TIME:-48h}"
+PRUNE_AUTOSOMES_TIME="${STAGE3_PRUNE_AUTOSOMES_TIME:-72h}"
+FINALIZE_STUDY_TIME="${STAGE3_FINALIZE_STUDY_TIME:-48h}"
+PUBLISH_INTERMEDIATE_PLINK="${STAGE3_PUBLISH_INTERMEDIATE_PLINK:-false}"
 WORKDIR="${STAGE3_WORKDIR:-${PROJ_ROOT}/pipeline_stage3/work}"
 CONDA_CACHE_DIR="${STAGE3_CONDA_CACHE_DIR:-${PROJ_ROOT}/pipeline_stage3/conda}"
 CONDA_SOLVER="${STAGE3_CONDA_SOLVER:-classic}"
@@ -227,6 +242,38 @@ while [[ $# -gt 0 ]]; do
     --partition)
       SLURM_PARTITION="$2"
       shift 2
+      ;;
+    --filter-chrom-time)
+      FILTER_CHROM_TIME="$2"
+      shift 2
+      ;;
+    --annotate-chrom-time)
+      ANNOTATE_CHROM_TIME="$2"
+      shift 2
+      ;;
+    --import-chrom-time)
+      IMPORT_CHROM_TIME="$2"
+      shift 2
+      ;;
+    --sample-review-time)
+      SAMPLE_REVIEW_TIME="$2"
+      shift 2
+      ;;
+    --prune-autosomes-time)
+      PRUNE_AUTOSOMES_TIME="$2"
+      shift 2
+      ;;
+    --finalize-study-time)
+      FINALIZE_STUDY_TIME="$2"
+      shift 2
+      ;;
+    --publish-intermediate-plink)
+      PUBLISH_INTERMEDIATE_PLINK="true"
+      shift
+      ;;
+    --no-publish-intermediate-plink)
+      PUBLISH_INTERMEDIATE_PLINK="false"
+      shift
       ;;
     --min-r2)
       MIN_R2="$2"
@@ -296,6 +343,13 @@ export BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 export PLINK_BIN="${PLINK_BIN:-plink}"
 export PLINK2_BIN="${PLINK2_BIN:-plink2}"
 export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
+export STAGE3_FILTER_CHROM_TIME="${FILTER_CHROM_TIME}"
+export STAGE3_ANNOTATE_CHROM_TIME="${ANNOTATE_CHROM_TIME}"
+export STAGE3_IMPORT_CHROM_TIME="${IMPORT_CHROM_TIME}"
+export STAGE3_SAMPLE_REVIEW_TIME="${SAMPLE_REVIEW_TIME}"
+export STAGE3_PRUNE_AUTOSOMES_TIME="${PRUNE_AUTOSOMES_TIME}"
+export STAGE3_FINALIZE_STUDY_TIME="${FINALIZE_STUDY_TIME}"
+export STAGE3_PUBLISH_INTERMEDIATE_PLINK="${PUBLISH_INTERMEDIATE_PLINK}"
 
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
 conda activate nf_EPIC-genetics || true
@@ -381,6 +435,13 @@ echo "dbSNP VCF:                  ${DBSNP_VCF}"
 echo "dbSNP TBI:                  ${DBSNP_TBI}"
 echo "Work dir:                   ${WORKDIR}"
 echo "Conda cache:                ${CONDA_CACHE_DIR}"
+echo "FILTER_CHROM wall time:     ${FILTER_CHROM_TIME}"
+echo "ANNOTATE_CHROM wall time:   ${ANNOTATE_CHROM_TIME}"
+echo "IMPORT_CHROM wall time:     ${IMPORT_CHROM_TIME}"
+echo "Sample-review wall time:    ${STAGE3_SAMPLE_REVIEW_TIME}"
+echo "PRUNE_AUTOSOMES wall time:  ${STAGE3_PRUNE_AUTOSOMES_TIME}"
+echo "FINALIZE_STUDY wall time:   ${STAGE3_FINALIZE_STUDY_TIME}"
+echo "Publish PLINK intermediates:${STAGE3_PUBLISH_INTERMEDIATE_PLINK}"
 echo "Min R2:                     ${MIN_R2}"
 echo "MAF:                        ${MAF}"
 echo "Run HWE:                    ${RUN_HWE}"
@@ -404,6 +465,13 @@ nextflow_cmd=(
   --dbsnp_tbi "${DBSNP_TBI}"
   --slurm_partition "${SLURM_PARTITION}"
   --cache_mode "${CACHE_MODE}"
+  --filter_chrom_time "${FILTER_CHROM_TIME}"
+  --annotate_chrom_time "${ANNOTATE_CHROM_TIME}"
+  --import_chrom_time "${IMPORT_CHROM_TIME}"
+  --sample_review_time "${SAMPLE_REVIEW_TIME}"
+  --prune_autosomes_time "${PRUNE_AUTOSOMES_TIME}"
+  --finalize_study_time "${FINALIZE_STUDY_TIME}"
+  --publish_intermediate_plink "${PUBLISH_INTERMEDIATE_PLINK}"
   --min_r2 "${MIN_R2}"
   --maf "${MAF}"
   --run_hwe "${RUN_HWE}"

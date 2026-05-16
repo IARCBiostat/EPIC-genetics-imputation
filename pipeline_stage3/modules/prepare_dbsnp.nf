@@ -39,7 +39,7 @@ process PREP_DBSNP_CHROM {
     printf "%s\\tchr%s\\n" "\${NC_CONTIG}" "${chr}" > chr_name_map.tsv
 
     \$BCFTOOLS_BIN view -r "\${NC_CONTIG}" "${dbsnp_vcf}" -Ou | \\
-      \$BCFTOOLS_BIN annotate --rename-chrs chr_name_map.tsv -Oz -o dbsnp_chr${chr}.vcf.gz
+      \$BCFTOOLS_BIN annotate --rename-chrs chr_name_map.tsv --remove INFO -Oz -o dbsnp_chr${chr}.vcf.gz
 
     \$BCFTOOLS_BIN index -f -t dbsnp_chr${chr}.vcf.gz
     """
