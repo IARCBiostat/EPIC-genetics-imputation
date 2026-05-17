@@ -128,6 +128,7 @@ Options:
   --dbsnp-vcf <file>                dbSNP GRCh38 VCF for rsID annotation
   --dbsnp-tbi <file>                dbSNP GRCh38 VCF index
   --partition <name>                Slurm partition for internal Nextflow task submissions
+  --prep-dbsnp-time <duration>            Wall time for PREP_DBSNP_CHROM jobs (default: 72h)
   --filter-chrom-time <duration>          Wall time for FILTER_CHROM jobs (default: 72h)
   --annotate-chrom-time <duration>        Wall time for ANNOTATE_CHROM jobs (default: 72h)
   --import-chrom-time <duration>          Wall time for IMPORT_CHROM jobs (default: 72h)
@@ -189,6 +190,7 @@ OUTDIR="${STAGE3_OUTDIR:-${PROJ_ROOT}/analysis}"
 STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${PROJ_ROOT}/analysis}"
 STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${PROJ_ROOT}/analysis}"
 SLURM_PARTITION="${STAGE3_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
+PREP_DBSNP_TIME="${STAGE3_PREP_DBSNP_TIME:-72h}"
 FILTER_CHROM_TIME="${STAGE3_FILTER_CHROM_TIME:-72h}"
 ANNOTATE_CHROM_TIME="${STAGE3_ANNOTATE_CHROM_TIME:-72h}"
 IMPORT_CHROM_TIME="${STAGE3_IMPORT_CHROM_TIME:-72h}"
@@ -251,6 +253,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --partition)
       SLURM_PARTITION="$2"
+      shift 2
+      ;;
+    --prep-dbsnp-time)
+      PREP_DBSNP_TIME="$2"
       shift 2
       ;;
     --filter-chrom-time)
@@ -373,6 +379,7 @@ export BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 export PLINK_BIN="${PLINK_BIN:-plink}"
 export PLINK2_BIN="${PLINK2_BIN:-plink2}"
 export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
+export STAGE3_PREP_DBSNP_TIME="${PREP_DBSNP_TIME}"
 export STAGE3_FILTER_CHROM_TIME="${FILTER_CHROM_TIME}"
 export STAGE3_ANNOTATE_CHROM_TIME="${ANNOTATE_CHROM_TIME}"
 export STAGE3_IMPORT_CHROM_TIME="${IMPORT_CHROM_TIME}"
@@ -470,6 +477,7 @@ echo "dbSNP VCF:                  ${DBSNP_VCF}"
 echo "dbSNP TBI:                  ${DBSNP_TBI}"
 echo "Work dir:                   ${WORKDIR}"
 echo "Conda cache:                ${CONDA_CACHE_DIR}"
+echo "PREP_DBSNP_CHROM wall time:      ${PREP_DBSNP_TIME}"
 echo "FILTER_CHROM wall time:          ${FILTER_CHROM_TIME}"
 echo "ANNOTATE_CHROM wall time:        ${ANNOTATE_CHROM_TIME}"
 echo "IMPORT_CHROM wall time:          ${IMPORT_CHROM_TIME}"
@@ -505,6 +513,7 @@ nextflow_cmd=(
   --dbsnp_tbi "${DBSNP_TBI}"
   --slurm_partition "${SLURM_PARTITION}"
   --cache_mode "${CACHE_MODE}"
+  --prep_dbsnp_time "${PREP_DBSNP_TIME}"
   --filter_chrom_time "${FILTER_CHROM_TIME}"
   --annotate_chrom_time "${ANNOTATE_CHROM_TIME}"
   --import_chrom_time "${IMPORT_CHROM_TIME}"
