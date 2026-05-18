@@ -22,7 +22,10 @@ process MERGE_STUDY {
     def pvar_list = pvars.collect { it.toString() }.join(' ')
     def psam_list = psams.collect { it.toString() }.join(' ')
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     PGENS=(${pgen_list})
     PVARS=(${pvar_list})
     PSAMS=(${psam_list})
@@ -66,7 +69,10 @@ process SEX_CHECK {
     def chrom_list = chroms.collect { it.toString() }.join(' ')
     def merged_prefix = merged_pgen.baseName
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     CHROMS=(${chrom_list})
 
     HAS_CHRX=0
@@ -113,7 +119,10 @@ process PRUNE_AUTOSOMES {
     script:
     def merged_prefix = merged_pgen.baseName
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     \$PLINK2_BIN \\
       --pfile ${merged_prefix} \\
       --chr 1-22 \\
@@ -154,7 +163,10 @@ process KING_QC {
     script:
     def pruned_prefix = pruned_bed.baseName
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     if ! \$PLINK2_BIN --bfile ${pruned_prefix} --threads ${threads} --make-king-table --out ${study_name}_king; then
       : > ${study_name}_king.kin0
       : > ${study_name}_related.king.cutoff.out.id
@@ -193,7 +205,10 @@ process HET_PCA_QC {
     script:
     def pruned_prefix = pruned_bed.baseName
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     \$PLINK_BIN --bfile ${pruned_prefix} --het --out ${study_name}_het
     \$PLINK2_BIN --bfile ${pruned_prefix} --threads ${threads} --pca ${params.ancestry_pc_count} --out ${study_name}_pca
     """
@@ -226,7 +241,10 @@ process SAMPLE_REVIEW_SUMMARY {
     path("${study_name}.related_outliers.id"), emit: related_outliers
 
     script:
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     \$PYTHON3_BIN "${projectDir}/bin/identify_sample_outliers.py" \\
       --eigenvec ${eigenvec} \\
       --het ${het} \\

@@ -8,7 +8,10 @@ process PREP_DBSNP_CHROM {
     tuple val(chr), path("dbsnp_chr${chr}.vcf.gz"), path("dbsnp_chr${chr}.vcf.gz.tbi")
 
     script:
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     case "${chr}" in
       1) NC_CONTIG="NC_000001.11" ;;
       2) NC_CONTIG="NC_000002.12" ;;

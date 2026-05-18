@@ -39,3 +39,6 @@ __pycache__/
 *.csv
 !/pipeline_stage2/*.csv
 !/src/*.csv
+
+# Analysis outputs (contain sample IDs — not for version control)
+/analysis/

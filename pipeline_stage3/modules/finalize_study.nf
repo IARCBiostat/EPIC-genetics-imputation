@@ -13,7 +13,10 @@ process FINALIZE_STUDY {
     script:
     def merged_prefix = merged_pgen.baseName
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     if [ -s "${remove_list}" ]; then
       \$PLINK2_BIN \\
         --pfile ${merged_prefix} \\

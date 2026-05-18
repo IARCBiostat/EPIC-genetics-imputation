@@ -9,7 +9,10 @@ process FILTER_CHROM {
 
     script:
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     \$BCFTOOLS_BIN query -l "${stage2_vcf}" | awk '{
         full_id = \$1;
         n = length(full_id);
@@ -43,7 +46,10 @@ process ANNOTATE_CHROM {
 
     script:
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     set -o pipefail
 
     \$BCFTOOLS_BIN index "${filtered_bcf}"
@@ -78,7 +84,10 @@ process IMPORT_CHROM {
 
     script:
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     if [ "${chr}" = "X" ]; then
       \$PLINK2_BIN \\
         --bcf ${annotated_bcf} dosage=HDS \\
@@ -125,7 +134,10 @@ process HWE_CHROM {
     script:
     def import_prefix = import_pgen.baseName
     def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     POST_R2_MAF_VARIANTS=\$(grep -vc '^#' ${import_prefix}.pvar)
 
     HWE_APPLIED=0

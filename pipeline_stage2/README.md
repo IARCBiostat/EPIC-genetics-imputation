@@ -157,3 +157,51 @@ The chrX pipeline:
 
 If a study has no chrX at all in stage 1, then chrX is absent from stage 2 by design and is not treated as an error.
 
+### 3.8 Step 8: Empirical Validation
+
+`STAGE_EMPIRICAL_VALIDATION_METRICS` performs leave-one-out empirical validation for each study chromosome (enabled by default; controlled by `run_empirical_validation: true` in `params.yaml`).
+
+For each genotyped variant, the pipeline:
+
+1. masks the variant from the study haplotypes
+2. re-imputes it from surrounding phased haplotypes
+3. compares the imputed dosage against the observed genotype
+
+This produces per-variant empirical dosage R² and Dose0 metrics. These are aggregated per chromosome and merged with the imputation metrics for reporting. Empirical validation requires at least `empirical_min_samples: 20` samples; studies below this threshold skip validation.
+
+### 3.9 Step 9: Reporting
+
+`REPORTING` collects per-chromosome imputation and empirical metrics and writes the study-level Stage 2 report (enabled by default; controlled by `run_reporting: true` in `params.yaml`).
+
+The report is written to:
+
+- `analysis/<STUDY>/stage2/report/report-stage2.html`
+
+It includes:
+
+- per-chromosome imputation metrics (variant counts, R² distribution, allele-frequency concordance)
+- empirical validation summaries by chromosome and MAF bin
+- per-variant R² and MAF distributions
+- phasing metrics where available
+
+## 4. Output Structure
+
+### 4.1 Imputed VCFs
+
+- `analysis/<STUDY>/stage2/<STUDY>_chr1_GxS.imputed.vcf.gz`
+- `analysis/<STUDY>/stage2/<STUDY>_chr1_GxS.imputed.vcf.gz.tbi`
+- `...`
+- `analysis/<STUDY>/stage2/<STUDY>_chrX_GxS.imputed.vcf.gz` (when chrX is present in stage 1)
+
+Each VCF contains dosage genotype fields (`DS`, `HDS`, `GP`) and the `INFO/R2` imputation quality score per variant.
+
+### 4.2 Report Assets
+
+- `analysis/<STUDY>/stage2/report/report-stage2.html` — per-study Stage 2 HTML dashboard
+- `analysis/<STUDY>/stage2/report/tables/` — per-chromosome and aggregate metric TSVs
+- `analysis/<STUDY>/stage2/report/figures/` — imputation quality plots
+
+### 4.3 Stage-Level Summary
+
+- `analysis/stage2-summary.md` — cross-study summary of imputation metrics written after all studies complete
+

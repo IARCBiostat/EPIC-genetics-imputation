@@ -21,7 +21,7 @@ Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
 
 ## 2. How To Run Stage 3
 
-Full run (HWE and Ancestry Exclusion are ENABLED by default):
+Full run (HWE filtering and ancestry outlier exclusion are both enabled by default):
 ```bash
 sbatch src/006_stage3.sh
 ```
@@ -29,6 +29,11 @@ sbatch src/006_stage3.sh
 To run a specific study:
 ```bash
 sbatch src/006_stage3.sh --study Glbd_01
+```
+
+To retain ancestry outliers in the final dataset (detection still runs):
+```bash
+sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 ```
 
 Large intermediate PLINK/PGEN/BED files are not copied into `analysis/` by default. To publish them for debugging or handoff:
@@ -207,16 +212,14 @@ Related sample removal is driven from the KING cutoff output.
 
 ### 3.12 Step 12: Identify Ancestry Outliers For Every Study
 
-Stage 3 always identifies ancestry outliers.
+Stage 3 always identifies ancestry outliers regardless of whether they will be excluded.
 
-This is mandatory.
+The detection and exclusion steps are deliberately separated:
 
-The key design choice is that ancestry outlier exclusion is controlled separately:
+- ancestry outlier detection always runs and produces the PCA plot and outlier list
+- ancestry outlier removal is enabled by default (`exclude_ancestry_outliers: true`); pass `--no-exclude-ancestry-outliers` to retain all samples in the final dataset
 
-- ancestry outliers are always detected
-- ancestry outliers are removed only when `--exclude-ancestry-outliers` is set
-
-This preserves a full ancestry-QC record even when the final dataset keeps those samples.
+This design preserves a complete ancestry-QC record even in analyses that intentionally retain the full sample set.
 
 ### 3.13 Step 13: Build The Final Removal List
 
@@ -226,9 +229,9 @@ The removal list always includes:
 - heterozygosity outliers
 - related samples
 
-It conditionally includes:
+It also includes ancestry outliers by default. Pass `--no-exclude-ancestry-outliers` to omit them:
 
-- ancestry outliers when `exclude_ancestry_outliers=true`
+- ancestry outliers included unless `--no-exclude-ancestry-outliers` is specified
 
 This list is written to:
 
