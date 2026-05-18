@@ -286,7 +286,7 @@ The following studies are processed by Stage 1:
 | `process_panc_01.py` | Panc_01 | Pancreatic cancer 1 |
 | `process_panc_02.py` | Panc_02 | Pancreatic cancer 2 |
 | `process_pros_01.py` | Pros_01 | Prostate cancer 1 |
-| `process_pros_02.py` | Pros_02 | Prostate cancer 2 |
+
 | `process_pros_03.py` | Pros_03 | Prostate cancer 3 |
 | `process_pros_04.py` | Pros_04 | Prostate cancer 4 |
 | `process_stom_01.py` | Stom_01 | Stomach cancer |

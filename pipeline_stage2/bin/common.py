@@ -36,7 +36,7 @@ DEFAULT_STUDIES = [
     "Panc_01",
     "Panc_02",
     "Pros_01",
-    "Pros_02",
+
     "Pros_03",
     "Pros_04",
     "Stom_01",

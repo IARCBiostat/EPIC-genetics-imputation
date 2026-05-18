@@ -74,7 +74,7 @@ STUDIES=(
     "Panc_01_PS1|Pancreas/Panc_01_PS1"
     "Panc_02_PS3|Pancreas/Panc_02_PS3"
     "Pros_01_Bpc3|Prostate/Pros_01_Bpc3"
-    "Pros_02_Icogs|Prostate/Pros_02_Icogs"
+
     "Pros_03_Onco|Prostate/Pros_03_Onco"
     "Pros_04_P160555|Prostate/Pros_04_P160555"
     "Ovar_01|Ovary/Ovar_01|Data_Received_2022|Chip_files|||Ovary/Ovar_01/Data_Received_2021/Link_Ids_Ovar_01Onco.csv|Data_Received_2021/Link_Ids_Ovar_01Onco.csv"

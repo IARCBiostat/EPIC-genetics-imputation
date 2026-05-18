@@ -284,7 +284,7 @@ study_map <- data.frame(
     "Panc_01_PS1",
     "Panc_02_PS3",
     "Pros_01_Bpc3",
-    "Pros_02_Icogs",
+
     "Pros_03_Onco",
     "Pros_04_P160555",
     "Ovar_01",

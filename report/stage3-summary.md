@@ -39,7 +39,7 @@ No complete stage-3 outputs were found.
 | Panc_01 | other-final-ids 11574108 | 751 | 673 | 11,574,108 |
 | Panc_02 | other-final-ids 11550880 | 183 | 164 | 11,550,880 |
 | Pros_01 | other-final-ids 11504324 | 856 | 709 | 11,504,324 |
-| Pros_02 | other-final-ids 10399664 | 1,801 | 1,577 | 10,399,664 |
+
 | Pros_03 | other-final-ids 11525173 | 1,137 | 1,066 | 11,525,173 |
 | Pros_04 | variant-metrics 22/23; other-final-ids 11254081 | 1,488 | 1,289 | 11,254,081 |
 | Stom_01 | other-final-ids 11594744 | 317 | 304 | 11,594,744 |

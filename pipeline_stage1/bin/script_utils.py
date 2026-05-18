@@ -102,8 +102,7 @@ STUDY_METADATA_COLUMNS = {
     "Panc_02_PS3": "Panc_02_PS3",
     "Pros_01": "Pros_01_Bpc3",
     "Pros_01_Bpc3": "Pros_01_Bpc3",
-    "Pros_02": "Pros_02_Icogs",
-    "Pros_02_Icogs": "Pros_02_Icogs",
+
     "Pros_03": "Pros_03_Onco",
     "Pros_03_Onco": "Pros_03_Onco",
     "Pros_04": "Pros_04_P160555",
