@@ -8,7 +8,10 @@ process PREP_DBSNP_CHROM {
     tuple val(chr), path("dbsnp_chr${chr}.vcf.gz"), path("dbsnp_chr${chr}.vcf.gz.tbi")
 
     script:
+    def backoff_secs = (task.attempt - 1) * 30
     """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
     case "${chr}" in
       1) NC_CONTIG="NC_000001.11" ;;
       2) NC_CONTIG="NC_000002.12" ;;
@@ -39,7 +42,7 @@ process PREP_DBSNP_CHROM {
     printf "%s\\tchr%s\\n" "\${NC_CONTIG}" "${chr}" > chr_name_map.tsv
 
     \$BCFTOOLS_BIN view -r "\${NC_CONTIG}" "${dbsnp_vcf}" -Ou | \\
-      \$BCFTOOLS_BIN annotate --rename-chrs chr_name_map.tsv -Oz -o dbsnp_chr${chr}.vcf.gz
+      \$BCFTOOLS_BIN annotate --rename-chrs chr_name_map.tsv --remove INFO -Oz -o dbsnp_chr${chr}.vcf.gz
 
     \$BCFTOOLS_BIN index -f -t dbsnp_chr${chr}.vcf.gz
     """

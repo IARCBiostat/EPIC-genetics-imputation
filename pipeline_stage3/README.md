@@ -15,13 +15,13 @@ Stage 3 produces a finalized, analysis-ready dataset and a Stage 3-only report. 
 
 Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
 - **`final/`**: The definitive, QC-passed PLINK2 files.
-- **`prep_chrom/`**: Intermediate per-chromosome PLINK2 files.
+- **`prep_chrom/`**: Optional intermediate per-chromosome PLINK2 files when `--publish-intermediate-plink` is enabled.
 - **`sample_review/`**: All sample-level QC artifacts (PCA, KING, Het, Sexcheck).
 - **`report/`**: Consolidated dashboards, tables, and figures.
 
 ## 2. How To Run Stage 3
 
-Full run (HWE and Ancestry Exclusion are ENABLED by default):
+Full run (HWE filtering and ancestry outlier exclusion are both enabled by default):
 ```bash
 sbatch src/006_stage3.sh
 ```
@@ -31,13 +31,23 @@ To run a specific study:
 sbatch src/006_stage3.sh --study Glbd_01
 ```
 
+To retain ancestry outliers in the final dataset (detection still runs):
+```bash
+sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
+```
+
+Large intermediate PLINK/PGEN/BED files are not copied into `analysis/` by default. To publish them for debugging or handoff:
+```bash
+sbatch src/006_stage3.sh --publish-intermediate-plink
+```
+
 ## 3. Ordered Execution Inside Stage 3
 
 Stage 3 is defined in `pipeline_stage3/main.nf` and uses four active modules:
 
 - `prepare_dbsnp.nf`
 - `prepare_chrom.nf`
-- `sample_review.nf`
+- `sample_review.nf` (`MERGE_STUDY`, `SEX_CHECK`, `PRUNE_AUTOSOMES`, `SAMPLE_QC`, `SAMPLE_REVIEW_SUMMARY`)
 - `finalize_study.nf`
 
 ### 3.1 Step 1: Prepare dbSNP Per Chromosome
@@ -73,7 +83,7 @@ The resulting stage-2 study/chromosome objects are then joined to the dbSNP chro
 `PREP_CHROM` first overlays dbSNP onto each imputed VCF:
 
 1. `bcftools annotate -a dbsnp_chr<CHR>.vcf.gz -c ID`
-2. write an annotated chromosome VCF
+2. stream the annotated VCF into variant-ID normalization
 
 At this point, variants with an exact dbSNP match receive their rsID.
 
@@ -91,6 +101,8 @@ This step also writes:
 - `<STUDY>_chr<CHR>.variant_id_map.tsv.gz`
 
 That mapping file is the audit trail between the original stage-2 ID, the dbSNP annotation result, and the final stage-3 ID.
+
+Annotation, ID normalization, and R2/MAF filtering are streamed together so stage 3 does not write full annotated or normalized temporary VCFs.
 
 ### 3.5 Step 5: Filter By Imputation Quality And MAF
 
@@ -150,7 +162,7 @@ The per-chromosome variant QC table records:
 
 ### 3.8 Step 8: Merge All Chromosomes Per Study
 
-`SAMPLE_REVIEW` begins by merging the chromosome-level PLINK2 files into one study-level dataset:
+`MERGE_STUDY` begins sample review by merging the chromosome-level PLINK2 files into one study-level dataset:
 
 - `<STUDY>_allchr.pgen`
 - `<STUDY>_allchr.pvar`
@@ -168,21 +180,22 @@ It extracts:
 - `IID`
 - sex code
 
-and updates the merged stage-3 dataset with `plink2 --update-sex`.
+and writes a sex-update file. `SEX_CHECK` applies it to the chrX QC bed set for sex check, and `FINALIZE_STUDY` applies it when writing the final stage-3 PLINK2 dataset.
 
 ### 3.10 Step 10: Build The Sample-QC Inputs
 
-Stage 3 then creates the study-level QC assets needed for heterozygosity, relatedness, sex check, and ancestry:
+The split sample-review processes then create the study-level QC assets needed for heterozygosity, relatedness, sex check, and ancestry:
 
-1. whole-genome PLINK bed set
-2. autosome-only PLINK bed set
-3. LD-pruned autosome set
+1. `SEX_CHECK`: chromosome-X PLINK bed set for sex check when chrX is present
+2. `PRUNE_AUTOSOMES`: LD-pruned autosome set
+3. `SAMPLE_QC`: relatedness, heterozygosity, and PCA from the pruned set
+4. `SAMPLE_REVIEW_SUMMARY`: final sample-exclusion manifests
 
-These are used because some sample-QC procedures are whole-genome and others are intended to be autosome-only.
+The full merged PLINK2 set is not converted to unpruned PLINK bed format; sample QC only materializes the smaller datasets required by each QC procedure.
 
 ### 3.11 Step 11: Run Sample QC
 
-`SAMPLE_REVIEW` performs four sample-QC procedures:
+The sample-review subprocesses perform four sample-QC procedures:
 
 1. sex check
 2. relatedness estimation / KING table
@@ -199,16 +212,14 @@ Related sample removal is driven from the KING cutoff output.
 
 ### 3.12 Step 12: Identify Ancestry Outliers For Every Study
 
-Stage 3 always identifies ancestry outliers.
+Stage 3 always identifies ancestry outliers regardless of whether they will be excluded.
 
-This is mandatory.
+The detection and exclusion steps are deliberately separated:
 
-The key design choice is that ancestry outlier exclusion is controlled separately:
+- ancestry outlier detection always runs and produces the PCA plot and outlier list
+- ancestry outlier removal is enabled by default (`exclude_ancestry_outliers: true`); pass `--no-exclude-ancestry-outliers` to retain all samples in the final dataset
 
-- ancestry outliers are always detected
-- ancestry outliers are removed only when `--exclude-ancestry-outliers` is set
-
-This preserves a full ancestry-QC record even when the final dataset keeps those samples.
+This design preserves a complete ancestry-QC record even in analyses that intentionally retain the full sample set.
 
 ### 3.13 Step 13: Build The Final Removal List
 
@@ -218,9 +229,9 @@ The removal list always includes:
 - heterozygosity outliers
 - related samples
 
-It conditionally includes:
+It also includes ancestry outliers by default. Pass `--no-exclude-ancestry-outliers` to omit them:
 
-- ancestry outliers when `exclude_ancestry_outliers=true`
+- ancestry outliers included unless `--no-exclude-ancestry-outliers` is specified
 
 This list is written to:
 
@@ -230,9 +241,7 @@ This list is written to:
 
 `FINALIZE_STUDY` applies the final removal list to the merged stage-3 pfile set.
 
-If the removal list is empty, the merged dataset is copied through unchanged.
-
-If the removal list is non-empty, the study is rewritten after `--remove`.
+`FINALIZE_STUDY` always applies the stage-1 sex update while writing the final dataset. If the removal list is non-empty, the study is also rewritten after `--remove`.
 
 The final published outputs are:
 
@@ -263,12 +272,13 @@ The Stage 3 report tracks:
 - `<STUDY>.pgen`, `<STUDY>.pvar`, `<STUDY>.psam`
 
 ### 5.2 Intermediate Process Assets
-- **`prep_chrom/`**: Per-chromosome PGENs after R2/MAF/HWE filtering.
+- **`prep_chrom/`**: Per-chromosome PGENs after R2/MAF/HWE filtering when `--publish-intermediate-plink` is enabled. By default, these files remain in the Nextflow work cache.
 - **`sample_review/`**:
     - `*.eigenvec` / `*.eigenval`: PCA results.
-    - `*.king.kin0`: Kinship coefficients.
+    - `*.kin0`: Kinship coefficients.
     - `*.het`: Heterozygosity statistics.
     - `*.sexcheck`: PLINK sex concordance results.
+    - Intermediate merged, chrX BED, and pruned BED files only when `--publish-intermediate-plink` is enabled.
 
 ### 5.3 Reporting Assets (`report/`)
 - **`report-stage3.html`**: The Stage 3-only study dashboard.

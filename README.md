@@ -1,6 +1,6 @@
 # EPIC Genetics Pipeline
 
-This repository contains the EPIC genetics imputation pipeline. The pipeline is composed of 3-stages, each stage uses an independent Neztflow workflow:
+This repository contains the EPIC genetics imputation pipeline. The pipeline is composed of 3-stages, each stage uses an independent Nextflow workflow:
 
 1. `pipeline_stage1/`: study-specific raw [genotype](https://en.wikipedia.org/wiki/Genotype) preprocessing and liftover to hg38
 2. `pipeline_stage2/`: [phasing](https://en.wikipedia.org/wiki/Haplotype_estimation) and [imputation](https://en.wikipedia.org/wiki/Imputation_(genetics)) against the [1000 Genomes Project](https://en.wikipedia.org/wiki/1000_Genomes_Project) high-coverage GRCh38 reference
@@ -163,10 +163,16 @@ All outputs, including intermediate stages and reports, are organized as:
 - `analysis/<STAGE>-pipeline_info/`
 	- provides the Nextflow trace and report for that stage
 
-The final study files and reports are in:
+The final study files and per-study reports are organised under `final_<YYYY-MM-DD>/`:
 
-- `final_<YYYY-MM-DD>/<STUDY>.[pgen/psam/pvar]`
-- `final_<YYYY-MM-DD>/<STUDY>.html`
+- `final_<YYYY-MM-DD>/studies/<STUDY>/stage3/final/<STUDY>.[pgen/pvar/psam]` — analysis-ready PLINK2 dataset
+- `final_<YYYY-MM-DD>/reports/master/<STUDY>.master-report.html` — cross-stage master report
+- `final_<YYYY-MM-DD>/reports/stage2/<STUDY>.report-stage2.html` — detailed phasing and imputation report
+- `final_<YYYY-MM-DD>/reports/stage3/<STUDY>.report-stage3.html` — detailed post-imputation QC report
+- `final_<YYYY-MM-DD>/summaries/stage1-summary.md` — Stage 1 summary across all studies
+- `final_<YYYY-MM-DD>/summaries/stage2-summary.md` — Stage 2 summary across all studies
+- `final_<YYYY-MM-DD>/summaries/stage3-summary.md` — Stage 3 summary across all studies
+- `final_<YYYY-MM-DD>/finalise_manifest.tsv` — manifest of all copied files and their copy status
 
 Temporary files and cache are kept inside the stage directories:
 
@@ -217,7 +223,7 @@ bash src/002_data-reference.sh
 We need to create a reference file which provides information on sex and case status for each sample as this is not provided in the raw genetics data:
 
 ```bash
-bash src/003_data-epic.sh
+Rscript src/003_data-epic.R
 ```
 
 ### 4: stage1, stage2, and stage3
@@ -248,21 +254,20 @@ sbatch src/008_finalise.sh
 
 ### testing/other
 
-We can perform a test across a single study if needed; we use `Glbd_01` for testing as its the smallest study:
-
+We can perform a test across a single study if needed; we use `Glbd_01` for testing as it is the smallest study:
 
 ```bash
-STAGE1_SCRIPTS=process_glbd_01_erneg.py sbatch src/004_stage1.sh
+STAGE1_SCRIPTS=process_glbd_01.py sbatch src/004_stage1.sh
 sbatch src/005_stage2.sh --study Glbd_01
 sbatch src/006_stage3.sh --study Glbd_01
 bash src/007_report.sh --study Glbd_01
 bash src/008_finalise.sh --study Glbd_01
 ```
 
-We can exclude ancestry outliers during `stage3` if needed finalization:
+Ancestry outliers are excluded by default. To retain ancestry outliers in the final dataset:
 
 ```bash
-sbatch src/006_stage3.sh --exclude-ancestry-outliers
+sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 ```
 
 ## Methods And Thresholds Summary
@@ -302,38 +307,48 @@ sbatch src/006_stage3.sh --exclude-ancestry-outliers
 | Sample QC: relatedness | Related or duplicate samples are identified with KING | `king_cutoff = 0.0884` | Related samples are always added to the removal list |
 | Sample QC: heterozygosity | Heterozygosity outliers are identified from the LD-pruned autosomal dataset | `het_sd_threshold = 3.0` | Samples beyond the SD threshold are added to the removal list |
 | Sample QC: ancestry identification | PCA-based ancestry outliers are identified for every study | `ancestry_pc_count = 10`; `ancestry_z_threshold = 6.0` | Identification is always performed |
-| Sample QC: ancestry exclusion | Ancestry outliers may optionally be excluded from the final dataset | `exclude_ancestry_outliers = false` by default | Outliers are only removed when the exclusion flag is enabled |
+| Sample QC: ancestry exclusion | Ancestry outliers are excluded from the final dataset by default | `exclude_ancestry_outliers = true` by default; use `--no-exclude-ancestry-outliers` to retain them | Ancestry outlier detection always runs; only the removal step is conditional |
 | Sample QC: sex update and sex check | Recorded sex is updated from the stage-1 `.fam`, then genotype-derived sex is checked | No separate numeric threshold exposed in params | Sex mismatches are always added to the removal list |
 
 ### Summary Table
 
-The table below provides a consolidated overview of sample and variant counts along with core imputation quality metrics.
+**N** and **Variants** are Stage 3 final counts after all QC filters. **Mean ER2** is the variant-count-weighted mean empirical dosage R² across chromosomes (leave-one-out validation of genotyped variants only; higher values indicate that imputed dosages closely match the observed genotypes at genotyped sites). **Mean R2** is the mean theoretical imputation R² (Rsq) across all imputed variants from Stage 2 (higher values indicate high-confidence imputation). **AF Pearson R** is the Pearson correlation between study and 1000 Genomes reference allele frequencies across all imputed variants (values closer to 1 indicate good allele-frequency concordance with the reference panel).
 
-| STUDY | N | variants | ER2 | R2 | AF R2 |
+| Study | N | Variants | Mean ER2 | Mean R2 | AF Pearson R |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `Brea_01_Erneg` | XXX | XXX | 0.817 | 0.780 | 0.985 |
-| `Brea_02` | XXX | XXX | 0.612 | 0.696 | 0.954 |
-| `Clrt_01` | XXX | XXX | 0.725 | 0.773 | 0.982 |
-| `Ecvd_01` | XXX | XXX | 0.584 | 0.684 | 0.923 |
-| `Ecvd_02` | XXX | XXX | 0.450 | 0.506 | 0.812 |
-| `Ecvd_03` | XXX | XXX | 0.421 | 0.481 | 0.798 |
-| `Glbd_01` | 104 | 11,596,225 | 0.825 | 0.815 | 0.991 |
-| `Inte_01` | XXX | XXX | 0.730 | 0.739 | 0.975 |
-| `Inte_02` | XXX | XXX | 0.680 | 0.685 | 0.942 |
-| `Inte_03` | XXX | XXX | 0.692 | 0.698 | 0.951 |
-| `Kidn_01` | XXX | XXX | 0.805 | 0.810 | 0.988 |
-| `Kidn_02` | XXX | XXX | 0.895 | 0.902 | 0.995 |
-| `Lung_01` | XXX | XXX | 0.702 | 0.716 | 0.962 |
-| `Lymp_01` | XXX | XXX | 0.795 | 0.805 | 0.984 |
-| `Neuro_01` | XXX | XXX | 0.550 | 0.626 | 0.895 |
-| `Ovar_01` | XXX | XXX | 0.715 | 0.732 | 0.968 |
-| `Panc_01` | XXX | XXX | 0.772 | 0.781 | 0.981 |
-| `Panc_02` | XXX | XXX | 0.835 | 0.845 | 0.990 |
-| `Pros_01` | XXX | XXX | 0.775 | 0.789 | 0.983 |
-| `Pros_02` | XXX | XXX | 0.512 | 0.598 | 0.865 |
-| `Pros_03` | XXX | XXX | 0.720 | 0.738 | 0.970 |
-| `Pros_04` | XXX | XXX | 0.705 | 0.730 | 0.965 |
-| `Stom_01` | XXX | XXX | 0.801 | 0.813 | 0.987 |
-| `Uadt_01` | XXX | XXX | 0.782 | 0.791 | 0.982 |
+| Brea_01_Erneg | 897 | 11,518,166 | 0.9500 | 0.780 | 0.8723 |
+| Brea_02 | 6,805 | 11,145,742 | 0.9346 | 0.696 | 0.8854 |
+| Clrt_01 | 3,511 | 11,479,634 | 0.9537 | 0.773 | 0.8834 |
+| Ecvd_01 | 8,270 | 10,975,074 | 0.9188 | 0.684 | 0.8850 |
+| Ecvd_02 | 7,686 | 6,645,327 | 0.8025 | 0.506 | 0.9053 |
+| Ecvd_03 | 8,192 | 4,734,296 | 0.7876 | 0.481 | 0.8984 |
+| Glbd_01 | 108 | 11,596,213 | 0.9428 | 0.815 | 0.8549 |
+| Inte_01 | 8,497 | 11,348,800 | 0.9448 | 0.739 | 0.8859 |
+| Inte_02 | 6,370 | 11,056,384 | 0.9162 | 0.685 | 0.8861 |
+| Inte_03 | 4,789 | 10,732,430 | 0.9242 | 0.698 | 0.8839 |
+| Kidn_01 | 328 | 11,536,302 | 0.9493 | 0.810 | 0.8640 |
+| Kidn_02 | 245 | 11,511,675 | 0.9736 | 0.902 | 0.8548 |
+| Lung_01 | 2,296 | 11,427,622 | 0.9211 | 0.716 | 0.8835 |
+| Lymp_01 | 433 | 11,601,660 | 0.9445 | 0.805 | 0.8717 |
+| Neuro_01 | 4,415 | 10,861,268 | 0.8546 | 0.626 | 0.8910 |
+| Ovar_01 | 1,256 | 11,537,933 | 0.9404 | 0.732 | 0.8824 |
+| Panc_01 | 673 | 11,574,108 | 0.9369 | 0.781 | 0.8754 |
+| Panc_02 | 164 | 11,550,880 | 0.9550 | 0.845 | 0.8540 |
+| Pros_01 | 709 | 11,504,324 | 0.9520 | 0.789 | 0.8691 |
+| Pros_02 | 1,577 | 10,399,664 | 0.8919 | 0.598 | 0.8917 |
+| Pros_03 | 1,066 | 11,525,173 | 0.9389 | 0.738 | 0.8791 |
+| Pros_04 | 1,289 | 11,254,081 | 0.8920 | 0.730 | 0.8868 |
+| Stom_01 | 304 | 11,594,744 | 0.9488 | 0.813 | 0.8650 |
+| Uadt_01 | 198 | 11,550,517 | 0.9414 | 0.791 | 0.8611 |
 
-*Note: N and variants reflect Stage 3 final counts. ER2, R2, and AF R2 are derived from Stage 2 performance metrics.*
+*N and Variants reflect the Stage 3 final dataset after R²/MAF/HWE variant filtering and sex/relatedness/heterozygosity/ancestry sample QC. Imputation metrics are from Stage 2. Per-study details are in the master reports under `analysis/report/`.*
+
+**Total unique participants across all 24 studies: 55,319** (70,078 total sample-study pairs; 9,738 participants appear in two or more studies).
+
+### Sample Overlap
+
+The UpSet plot below shows the intersection sizes across studies. Each bar represents the number of participants shared by the indicated combination of studies; horizontal bars on the left show each study's total sample count. Single-study bars (one dot) represent participants unique to that study.
+
+![Sample overlap across EPIC genetics studies](analysis/report/sample_overlap_upset.png)
+
+The full pairwise overlap matrix and per-sample multi-study membership table are in `analysis/report/sample_overlap_matrix.tsv` and `analysis/report/sample_overlap_membership.tsv`. These files are generated by `src/sample_overlap.py`.

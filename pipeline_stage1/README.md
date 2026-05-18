@@ -138,7 +138,7 @@ Some studies need special preprocessing before EPIC ID harmonization. Depending 
 - exclude X/Y/XY/MT before sample harmonization
 - convert AB allele nomenclature to explicit alleles
 
-The detailed study-specific matrix appears in Section 6.
+The study-specific `PRE` configuration field controls which of these steps are applied. The logic is self-documented in the configuration block at the top of each study script under `pipeline_stage1/scripts/`.
 
 ### 4.5 Step 5: Harmonize Sample IDs To EPIC IDs
 
@@ -174,7 +174,7 @@ Part 1 exclusion always begins by removing SNPs not found in the manifest compar
 - allele mismatch handling
 - optional unknown-strand exclusion
 
-This is the first major study-specific branch point in the pipeline and is documented in Sections 6 and 7.
+This is the first major study-specific branch point in the pipeline. The study-specific `PART1` configuration field in each script defines which exclusion classes apply.
 
 ### 4.7 Step 7: Run The Completion Stage
 
@@ -240,16 +240,55 @@ Intermediate exclusion lists, QC outputs, linkage files, and liftover artefacts 
 
 This is deliberate: stage 1 is designed to be auditable study by study.
 
-## 5. Study-Specific Configuration Fields
+## 5. Reporting
+
+After all study scripts complete, `src/004_stage1.sh` runs two reporting steps:
+
+1. **Study-level reports** — `pipeline_stage1/scripts/run_stage1_reports.py` generates per-study figures, tables, and HTML report assets under `analysis/<STUDY>/stage1/report/`. These are consumed by the cross-stage master report generator (`src/007_report.sh`).
+
+2. **Cross-study summary** — `pipeline_stage1/scripts/summary.py` writes a markdown summary of sample and variant counts across all studies to `analysis/stage1-summary.md`.
+
+## 6. Study-Specific Configuration Fields
 
 The stage-1 scripts encode all study-specific logic in the configuration block at the top of each file:
 
 | Field | Meaning |
 | --- | --- |
-| `BUILD` | Starting genome build of the raw study data |
+| `BUILD` | Starting genome build of the raw study data (`36`, `37`, or `38`) |
 | `ID_LINK_REL` | Study-specific sample ID linkage file, if required |
 | `PRE` | Pre-ID special handling such as sorting, position reset, AB translation, or chromosome exclusion |
-| `PART1` | Study-specific Part 1 SNP exclusion behavior |
-| `COMPLETION` | Study-specific metadata completion behavior |
+| `PART1` | Study-specific Part 1 SNP exclusion behaviour |
+| `COMPLETION` | Study-specific metadata completion behaviour |
 | `PART2_BUILD35_REL` | Optional extra build-35 exclusion list applied in Part 2 |
+
+## 7. Studies
+
+The following studies are processed by Stage 1:
+
+| Script | Study ID | Description |
+| --- | --- | --- |
+| `process_brea_01_erneg.py` | Brea_01_Erneg | Breast cancer — ER-negative |
+| `process_brea_02.py` | Brea_02 | Breast cancer |
+| `process_clrt_01.py` | Clrt_01 | Colorectal cancer |
+| `process_ecvd_01.py` | Ecvd_01 | Cardiovascular disease 1 |
+| `process_ecvd_02.py` | Ecvd_02 | Cardiovascular disease 2 |
+| `process_ecvd_03.py` | Ecvd_03 | Cardiovascular disease 3 |
+| `process_glbd_01.py` | Glbd_01 | Gallbladder |
+| `process_inte_01.py` | Inte_01 | InterAct 1 |
+| `process_inte_02.py` | Inte_02 | InterAct 2 |
+| `process_inte_03.py` | Inte_03 | InterAct 3 |
+| `process_kidn_01.py` | Kidn_01 | Kidney cancer 1 |
+| `process_kidn_02.py` | Kidn_02 | Kidney cancer 2 |
+| `process_lung_01.py` | Lung_01 | Lung cancer |
+| `process_lymp_01.py` | Lymp_01 | Lymphoma |
+| `process_neuro_01.py` | Neuro_01 | Neurological |
+| `process_ovar_01.py` | Ovar_01 | Ovarian cancer |
+| `process_panc_01.py` | Panc_01 | Pancreatic cancer 1 |
+| `process_panc_02.py` | Panc_02 | Pancreatic cancer 2 |
+| `process_pros_01.py` | Pros_01 | Prostate cancer 1 |
+| `process_pros_02.py` | Pros_02 | Prostate cancer 2 |
+| `process_pros_03.py` | Pros_03 | Prostate cancer 3 |
+| `process_pros_04.py` | Pros_04 | Prostate cancer 4 |
+| `process_stom_01.py` | Stom_01 | Stomach cancer |
+| `process_uadt_01.py` | Uadt_01 | Upper aerodigestive tract cancer |
 
