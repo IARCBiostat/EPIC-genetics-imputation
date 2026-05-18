@@ -6,6 +6,7 @@
 !/README.md
 !/walkthrough.md
 !/.env.example
+!/report/
 
 # Allow core logic directories
 !/pipeline_stage1/
