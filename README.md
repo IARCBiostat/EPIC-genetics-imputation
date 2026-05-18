@@ -341,7 +341,7 @@ sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 | Stom_01 | 304 | 11,594,744 | 0.9488 | 0.813 | 0.8650 |
 | Uadt_01 | 198 | 11,550,517 | 0.9414 | 0.791 | 0.8611 |
 
-*N and Variants reflect the Stage 3 final dataset after R²/MAF/HWE variant filtering and sex/relatedness/heterozygosity/ancestry sample QC. Imputation metrics are from Stage 2. Per-study details are in the master reports under `analysis/report/`.*
+*N and Variants reflect the Stage 3 final dataset after R²/MAF/HWE variant filtering and sex/relatedness/heterozygosity/ancestry sample QC. Imputation metrics are from Stage 2. Per-study details are in the master reports under `report/`.*
 
 **Total unique participants across all 24 studies: 55,319** (70,078 total sample-study pairs; 9,738 participants appear in two or more studies).
 
@@ -349,4 +349,4 @@ sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 
 The UpSet plot below shows the intersection sizes across studies. Each bar represents the number of participants shared by the indicated combination of studies; horizontal bars on the left show each study's total sample count. Single-study bars (one dot) represent participants unique to that study.
 
-![Sample overlap across EPIC genetics studies](analysis/report/sample_overlap_upset.png)
+![Sample overlap across EPIC genetics studies](report/sample_overlap_upset.png)
