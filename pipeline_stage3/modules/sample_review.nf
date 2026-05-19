@@ -46,60 +46,6 @@ process MERGE_STUDY {
     """
 }
 
-process SEX_CHECK {
-    label 'sample_review'
-    tag "${study_name}"
-    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
-        if (filename.endsWith('.sexcheck')) {
-            return "${study_name}/stage3/sample_review/${filename}"
-        }
-        if (params.publish_intermediate_plink.toString().toBoolean() && (filename.endsWith('.bed') || filename.endsWith('.bim') || filename.endsWith('.fam'))) {
-            return "${study_name}/stage3/sample_review/${filename}"
-        }
-        null
-    }
-
-    input:
-    tuple val(study_name), val(chroms), path(merged_pgen), path(merged_pvar), path(merged_psam), path(sex_update)
-
-    output:
-    tuple val(study_name), path("${study_name}_sexcheck.sexcheck"), emit: sexcheck
-
-    script:
-    def chrom_list = chroms.collect { it.toString() }.join(' ')
-    def merged_prefix = merged_pgen.baseName
-    def threads = task.cpus
-    def backoff_secs = (task.attempt - 1) * 30
-    """
-    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
-
-    CHROMS=(${chrom_list})
-
-    HAS_CHRX=0
-    for chr in "\${CHROMS[@]}"; do
-      if [ "\${chr}" = "X" ]; then
-        HAS_CHRX=1
-      fi
-    done
-
-    if [ "\${HAS_CHRX}" = "1" ]; then
-      if ! \$PLINK2_BIN \\
-          --pfile ${merged_prefix} \\
-          --chr X \\
-          --update-sex ${sex_update} \\
-          --threads ${threads} \\
-          --make-bed \\
-          --out ${study_name}_chrX_bed; then
-        : > ${study_name}_sexcheck.sexcheck
-      elif ! \$PLINK_BIN --bfile ${study_name}_chrX_bed --check-sex --out ${study_name}_sexcheck; then
-        : > ${study_name}_sexcheck.sexcheck
-      fi
-    else
-      : > ${study_name}_sexcheck.sexcheck
-    fi
-    """
-}
-
 process PRUNE_AUTOSOMES {
     label 'sample_review'
     tag "${study_name}"
@@ -231,12 +177,11 @@ process SAMPLE_REVIEW_SUMMARY {
     }
 
     input:
-    tuple val(study_name), path(sexcheck), path(related_ids), path(het), path(eigenvec), path(eigenval), path(merged_psam)
+    tuple val(study_name), path(related_ids), path(het), path(eigenvec), path(eigenval), path(merged_psam)
     val exclude_ancestry_outliers
 
     output:
     tuple val(study_name), path("${study_name}.samples_to_remove.id"), path("${study_name}.sample_review.tsv"), emit: summary
-    path("${study_name}.sex_mismatch.id"), emit: sex_mismatch
     path("${study_name}.heterozygosity_outliers.id"), emit: heterozygosity_outliers
     path("${study_name}.ancestry_outliers.id"), emit: ancestry_outliers
     path("${study_name}.related_outliers.id"), emit: related_outliers
@@ -249,7 +194,6 @@ process SAMPLE_REVIEW_SUMMARY {
     \$PYTHON3_BIN "${projectDir}/bin/identify_sample_outliers.py" \\
       --eigenvec ${eigenvec} \\
       --het ${het} \\
-      --sexcheck ${sexcheck} \\
       --out-prefix ${study_name} \\
       --pc-count ${params.ancestry_pc_count} \\
       --ancestry-z-threshold ${params.ancestry_z_threshold} \\
@@ -262,7 +206,6 @@ process SAMPLE_REVIEW_SUMMARY {
     fi
 
     : > ${study_name}.samples_to_remove.id
-    cat ${study_name}.sex_mismatch.id >> ${study_name}.samples_to_remove.id
     cat ${study_name}.heterozygosity_outliers.id >> ${study_name}.samples_to_remove.id
     cat ${study_name}.related_outliers.id >> ${study_name}.samples_to_remove.id
 
@@ -275,16 +218,15 @@ process SAMPLE_REVIEW_SUMMARY {
     sort -u ${study_name}.samples_to_remove.id -o ${study_name}.samples_to_remove.id
 
     PRE_FINAL_SAMPLES=\$(awk 'NR > 1 {count++} END {print count + 0}' ${merged_psam})
-    SEX_MISMATCH_COUNT=\$(wc -l < ${study_name}.sex_mismatch.id | tr -d ' ')
     RELATED_COUNT=\$(wc -l < ${study_name}.related_outliers.id | tr -d ' ')
     HET_COUNT=\$(wc -l < ${study_name}.heterozygosity_outliers.id | tr -d ' ')
     ANCESTRY_IDENTIFIED_COUNT=\$(wc -l < ${study_name}.ancestry_outliers.id | tr -d ' ')
     TOTAL_REMOVED_COUNT=\$(wc -l < ${study_name}.samples_to_remove.id | tr -d ' ')
 
     {
-      printf "study\\tpre_final_samples\\tsex_mismatch\\trelated_removed\\theterozygosity_outliers\\tancestry_outliers_identified\\tancestry_outliers_removed\\ttotal_removed\\n"
-      printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" \\
-        "${study_name}" "\${PRE_FINAL_SAMPLES}" "\${SEX_MISMATCH_COUNT}" "\${RELATED_COUNT}" "\${HET_COUNT}" "\${ANCESTRY_IDENTIFIED_COUNT}" "\${ANCESTRY_REMOVED_COUNT}" "\${TOTAL_REMOVED_COUNT}"
+      printf "study\\tpre_final_samples\\trelated_removed\\theterozygosity_outliers\\tancestry_outliers_identified\\tancestry_outliers_removed\\ttotal_removed\\n"
+      printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" \\
+        "${study_name}" "\${PRE_FINAL_SAMPLES}" "\${RELATED_COUNT}" "\${HET_COUNT}" "\${ANCESTRY_IDENTIFIED_COUNT}" "\${ANCESTRY_REMOVED_COUNT}" "\${TOTAL_REMOVED_COUNT}"
     } > ${study_name}.sample_review.tsv
     """
 }

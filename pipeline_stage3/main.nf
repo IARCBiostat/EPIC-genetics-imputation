@@ -3,7 +3,7 @@ nextflow.enable.dsl = 2
 
 include { PREP_DBSNP_CHROM } from './modules/prepare_dbsnp.nf'
 include { FILTER_CHROM; ANNOTATE_CHROM; IMPORT_CHROM; HWE_CHROM } from './modules/prepare_chrom.nf'
-include { MERGE_STUDY; SEX_CHECK; PRUNE_AUTOSOMES; KING_QC; HET_PCA_QC; SAMPLE_REVIEW_SUMMARY } from './modules/sample_review.nf'
+include { MERGE_STUDY; PRUNE_AUTOSOMES; KING_QC; HET_PCA_QC; SAMPLE_REVIEW_SUMMARY } from './modules/sample_review.nf'
 include { FINALIZE_STUDY } from './modules/finalize_study.nf'
 
 def chromSortKey(String chrom) {
@@ -102,12 +102,6 @@ workflow {
 
     ch_merged_study = MERGE_STUDY(ch_sample_review_input).merged
 
-    ch_sexcheck = SEX_CHECK(
-        ch_merged_study.map { study, chroms, pgen, pvar, psam, sex_update ->
-            tuple(study, chroms, pgen, pvar, psam, sex_update)
-        }
-    ).sexcheck
-
     ch_pruned_bed = PRUNE_AUTOSOMES(
         ch_merged_study.map { study, chroms, pgen, pvar, psam, sex_update ->
             tuple(study, pgen, pvar, psam)
@@ -117,16 +111,15 @@ workflow {
     ch_king = KING_QC(ch_pruned_bed)
     ch_het_pca = HET_PCA_QC(ch_pruned_bed)
 
-    ch_review_summary_input = ch_sexcheck
-        .join(ch_king.related_ids)
+    ch_review_summary_input = ch_king.related_ids
         .join(ch_het_pca.qc_files)
         .join(
             ch_merged_study.map { study, chroms, pgen, pvar, psam, sex_update ->
                 tuple(study, psam)
             }
         )
-        .map { study, sexcheck, related_ids, het, eigenvec, eigenval, psam ->
-            tuple(study, sexcheck, related_ids, het, eigenvec, eigenval, psam)
+        .map { study, related_ids, het, eigenvec, eigenval, psam ->
+            tuple(study, related_ids, het, eigenvec, eigenval, psam)
         }
 
     ch_review_summary = SAMPLE_REVIEW_SUMMARY(ch_review_summary_input, params.exclude_ancestry_outliers).summary

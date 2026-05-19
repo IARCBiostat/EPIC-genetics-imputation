@@ -8,10 +8,9 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Identify sex, heterozygosity, and ancestry outliers.")
+    parser = argparse.ArgumentParser(description="Identify heterozygosity and ancestry outliers.")
     parser.add_argument("--eigenvec", required=True)
     parser.add_argument("--het", required=True)
-    parser.add_argument("--sexcheck", required=True)
     parser.add_argument("--out-prefix", required=True)
     parser.add_argument("--pc-count", type=int, default=10)
     parser.add_argument("--ancestry-z-threshold", type=float, default=6.0)
@@ -76,35 +75,6 @@ def write_detail_file(path: Path, fieldnames: list[str], rows: list[dict[str, st
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
-
-
-def identify_sex_mismatches(rows: list[dict[str, str]]) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
-    mismatches: list[tuple[str, str]] = []
-    details: list[dict[str, str]] = []
-    for row in rows:
-        fid = row.get("FID", "")
-        iid = row.get("IID", "")
-        pedsex = row.get("PEDSEX", row.get("PED_SEX", ""))
-        snpsex = row.get("SNPSEX", row.get("SNP_SEX", ""))
-        status = row.get("STATUS", "")
-
-        ped_informative = pedsex in {"1", "2"}
-        snp_informative = snpsex in {"1", "2"}
-        mismatch = ped_informative and snp_informative and pedsex != snpsex
-
-        if mismatch:
-            mismatches.append((fid, iid))
-            details.append(
-                {
-                    "FID": fid,
-                    "IID": iid,
-                    "PEDSEX": pedsex,
-                    "SNPSEX": snpsex,
-                    "STATUS": status,
-                }
-            )
-
-    return mismatches, details
 
 
 def identify_heterozygosity_outliers(
@@ -216,11 +186,9 @@ def main() -> None:
     args = parse_args()
     out_prefix = Path(args.out_prefix)
 
-    sex_rows = read_table(Path(args.sexcheck)) if Path(args.sexcheck).exists() else []
     het_rows = read_table(Path(args.het)) if Path(args.het).exists() else []
     eigenvec_rows = read_table(Path(args.eigenvec)) if Path(args.eigenvec).exists() else []
 
-    sex_ids, sex_details = identify_sex_mismatches(sex_rows)
     het_ids, het_details = identify_heterozygosity_outliers(het_rows, args.het_sd_threshold)
     ancestry_ids, ancestry_details = identify_ancestry_outliers(
         eigenvec_rows,
@@ -228,15 +196,9 @@ def main() -> None:
         args.ancestry_z_threshold,
     )
 
-    write_id_file(out_prefix.with_suffix(".sex_mismatch.id"), sex_ids)
     write_id_file(out_prefix.with_suffix(".heterozygosity_outliers.id"), het_ids)
     write_id_file(out_prefix.with_suffix(".ancestry_outliers.id"), ancestry_ids)
 
-    write_detail_file(
-        out_prefix.with_suffix(".sex_mismatch.tsv"),
-        ["FID", "IID", "PEDSEX", "SNPSEX", "STATUS"],
-        sex_details,
-    )
     write_detail_file(
         out_prefix.with_suffix(".heterozygosity_outliers.tsv"),
         ["FID", "IID", "HET_SCORE", "Z_SCORE"],
