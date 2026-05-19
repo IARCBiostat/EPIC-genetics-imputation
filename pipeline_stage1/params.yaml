@@ -8,3 +8,11 @@ cache_mode: "deep"
 python3_bin: "python3"
 python2_bin: "python2.7"
 plink_bin: "plink"
+plink2_bin: "plink2"
+sex_check_f_female: 0.2
+sex_check_f_male: 0.8
+sex_check_min_variants: 100
+hwe_p: 0.000001
+het_sd_threshold: 3.0
+king_duplicate_cutoff: 0.354
+maf_phasing: 0.005
