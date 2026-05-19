@@ -14,15 +14,9 @@ process IMPUTE_CHRX {
     tuple val(study_name), path("${study_name}_chrX_GxS.imputed.vcf.gz"), path("${study_name}_chrX_GxS.imputed.vcf.gz.tbi")
 
     script:
+    def threads = task.cpus
     """
     set -euo pipefail
-
-    # 0. Preparation
-    EAGLE_CMD="\$(command -v "\${EAGLE_BIN}" 2>/dev/null || command -v eagle 2>/dev/null || command -v Eagle 2>/dev/null || true)"
-    if [ -z "\${EAGLE_CMD}" ]; then
-        echo "Eagle binary not found in process environment" >&2
-        exit 1
-    fi
 
     prepare_minimac_target() {
         local block="\$1"
@@ -54,11 +48,13 @@ process IMPUTE_CHRX {
     \$BCFTOOLS_BIN index -t target.PAR1.vcf.gz
 
     if [ "\$(\$BCFTOOLS_BIN view -H target.PAR1.vcf.gz | wc -l | tr -d ' ')" -gt 0 ]; then
-        if "\${EAGLE_CMD}" \\
-            --vcfRef 1kGP_panel_chrX.PAR1.bcf \\
-            --vcfTarget target.PAR1.vcf.gz \\
-            --allowRefAltSwap --geneticMapFile=${params.genetic_map_file} \\
-            --numThreads ${params.eagle_threads} --outPrefix phased.PAR1; then
+        if \$SHAPEIT5_COMMON_BIN \\
+            --input target.PAR1.vcf.gz \\
+            --reference 1kGP_panel_chrX.PAR1.bcf \\
+            --map ${params.shapeit5_map_dir}/chrX.b38.gmap.gz \\
+            --region chrX:1-2781513 \\
+            --thread ${threads} \\
+            --output phased.PAR1.vcf.gz; then
             \$BCFTOOLS_BIN index -t phased.PAR1.vcf.gz
 
             if prepare_minimac_target PAR1 && \\
@@ -71,8 +67,8 @@ process IMPUTE_CHRX {
                 rm -f imputed.PAR1.vcf.gz imputed.PAR1.vcf.gz.tbi
             fi
         else
-            echo "Skipping chrX PAR1: Eagle failed on this block"
-            rm -f phased.PAR1.vcf.gz phased.PAR1.vcf.gz.csi
+            echo "Skipping chrX PAR1: SHAPEIT5 failed on this block"
+            rm -f phased.PAR1.vcf.gz phased.PAR1.vcf.gz.tbi
         fi
     else
         echo "Skipping chrX PAR1: no overlapping target/reference variants after filtering"
@@ -88,11 +84,13 @@ process IMPUTE_CHRX {
     \$BCFTOOLS_BIN index -t target.nonPAR.vcf.gz
 
     if [ "\$(\$BCFTOOLS_BIN view -H target.nonPAR.vcf.gz | wc -l | tr -d ' ')" -gt 0 ]; then
-        if "\${EAGLE_CMD}" \\
-            --vcfRef 1kGP_panel_chrX.nonPAR.bcf \\
-            --vcfTarget target.nonPAR.vcf.gz \\
-            --allowRefAltSwap --geneticMapFile=${params.genetic_map_file} \\
-            --numThreads ${params.eagle_threads} --outPrefix phased.nonPAR; then
+        if \$SHAPEIT5_COMMON_BIN \\
+            --input target.nonPAR.vcf.gz \\
+            --reference 1kGP_panel_chrX.nonPAR.bcf \\
+            --map ${params.shapeit5_map_dir}/chrX.b38.gmap.gz \\
+            --region chrX:2781514-155700882 \\
+            --thread ${threads} \\
+            --output phased.nonPAR.vcf.gz; then
             \$BCFTOOLS_BIN index -t phased.nonPAR.vcf.gz
 
             if prepare_minimac_target nonPAR && \\
@@ -105,8 +103,8 @@ process IMPUTE_CHRX {
                 rm -f imputed.nonPAR.vcf.gz imputed.nonPAR.vcf.gz.tbi
             fi
         else
-            echo "Skipping chrX nonPAR: Eagle failed on this block"
-            rm -f phased.nonPAR.vcf.gz phased.nonPAR.vcf.gz.csi
+            echo "Skipping chrX nonPAR: SHAPEIT5 failed on this block"
+            rm -f phased.nonPAR.vcf.gz phased.nonPAR.vcf.gz.tbi
         fi
     else
         echo "Skipping chrX nonPAR: no overlapping target/reference variants after filtering"
@@ -122,11 +120,13 @@ process IMPUTE_CHRX {
     \$BCFTOOLS_BIN index -t target.PAR2.vcf.gz
 
     if [ "\$(\$BCFTOOLS_BIN view -H target.PAR2.vcf.gz | wc -l | tr -d ' ')" -gt 0 ]; then
-        if "\${EAGLE_CMD}" \\
-            --vcfRef 1kGP_panel_chrX.PAR2.bcf \\
-            --vcfTarget target.PAR2.vcf.gz \\
-            --allowRefAltSwap --geneticMapFile=${params.genetic_map_file} \\
-            --numThreads ${params.eagle_threads} --outPrefix phased.PAR2; then
+        if \$SHAPEIT5_COMMON_BIN \\
+            --input target.PAR2.vcf.gz \\
+            --reference 1kGP_panel_chrX.PAR2.bcf \\
+            --map ${params.shapeit5_map_dir}/chrX.b38.gmap.gz \\
+            --region chrX:155700883- \\
+            --thread ${threads} \\
+            --output phased.PAR2.vcf.gz; then
             \$BCFTOOLS_BIN index -t phased.PAR2.vcf.gz
 
             if prepare_minimac_target PAR2 && \\
@@ -139,8 +139,8 @@ process IMPUTE_CHRX {
                 rm -f imputed.PAR2.vcf.gz imputed.PAR2.vcf.gz.tbi
             fi
         else
-            echo "Skipping chrX PAR2: Eagle failed on this block"
-            rm -f phased.PAR2.vcf.gz phased.PAR2.vcf.gz.csi
+            echo "Skipping chrX PAR2: SHAPEIT5 failed on this block"
+            rm -f phased.PAR2.vcf.gz phased.PAR2.vcf.gz.tbi
         fi
     else
         echo "Skipping chrX PAR2: no overlapping target/reference variants after filtering"

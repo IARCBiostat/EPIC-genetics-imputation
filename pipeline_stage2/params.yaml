@@ -12,7 +12,7 @@ minimac_batch_size: 900
 # References
 ref_1000g_dir: "../data/reference/1000G"
 fasta_ref: "../data/reference/1000G/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
-genetic_map_file: "../data/reference/eagle/genetic_map_hg38_withX.txt.gz"
+shapeit5_map_dir: "../data/reference/shapeit5/maps"
 
 # Nextflow logic routing
 run_preprocessing: true

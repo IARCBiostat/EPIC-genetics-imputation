@@ -13,20 +13,15 @@ process PHASE_AUTOSOMES {
     tuple val(study_name), val(chr), path("${study_name}_chr${chr}_GxS.phased.vcf.gz"), path("${study_name}_chr${chr}_GxS.phased.vcf.gz.csi")
 
     script:
+    def threads = task.cpus
     """
-    EAGLE_CMD="\$(command -v "\${EAGLE_BIN}" 2>/dev/null || command -v eagle 2>/dev/null || command -v Eagle 2>/dev/null || true)"
-    if [ -z "\${EAGLE_CMD}" ]; then
-        echo "Eagle binary not found in process environment" >&2
-        exit 1
-    fi
-
-    "\${EAGLE_CMD}" \\
-        --vcfRef ${ref_bcf} \\
-        --vcfTarget ${target_vcf} \\
-        --allowRefAltSwap \\
-        --geneticMapFile=${params.genetic_map_file} \\
-        --numThreads ${params.eagle_threads} \\
-        --outPrefix ${study_name}_chr${chr}_GxS.phased
+    \$SHAPEIT5_COMMON_BIN \\
+        --input ${target_vcf} \\
+        --reference ${ref_bcf} \\
+        --map ${params.shapeit5_map_dir}/chr${chr}.b38.gmap.gz \\
+        --region chr${chr} \\
+        --thread ${threads} \\
+        --output ${study_name}_chr${chr}_GxS.phased.vcf.gz
 
     \$BCFTOOLS_BIN index ${study_name}_chr${chr}_GxS.phased.vcf.gz
     """

@@ -5,4 +5,4 @@ channels:
   - nodefaults
 dependencies:
   - bcftools
-  - eagle2=2.4.1
+  - shapeit5
