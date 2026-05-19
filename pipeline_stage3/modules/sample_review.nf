@@ -232,6 +232,7 @@ process SAMPLE_REVIEW_SUMMARY {
 
     input:
     tuple val(study_name), path(sexcheck), path(related_ids), path(het), path(eigenvec), path(eigenval), path(merged_psam)
+    val exclude_ancestry_outliers
 
     output:
     tuple val(study_name), path("${study_name}.samples_to_remove.id"), path("${study_name}.sample_review.tsv"), emit: summary
@@ -266,7 +267,7 @@ process SAMPLE_REVIEW_SUMMARY {
     cat ${study_name}.related_outliers.id >> ${study_name}.samples_to_remove.id
 
     ANCESTRY_REMOVED_COUNT=0
-    if [ "${params.exclude_ancestry_outliers}" = "true" ]; then
+    if [ "${exclude_ancestry_outliers}" = "true" ]; then
       cat ${study_name}.ancestry_outliers.id >> ${study_name}.samples_to_remove.id
       ANCESTRY_REMOVED_COUNT=\$(wc -l < ${study_name}.ancestry_outliers.id | tr -d ' ')
     fi

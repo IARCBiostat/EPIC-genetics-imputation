@@ -129,7 +129,7 @@ workflow {
             tuple(study, sexcheck, related_ids, het, eigenvec, eigenval, psam)
         }
 
-    ch_review_summary = SAMPLE_REVIEW_SUMMARY(ch_review_summary_input).summary
+    ch_review_summary = SAMPLE_REVIEW_SUMMARY(ch_review_summary_input, params.exclude_ancestry_outliers).summary
 
     ch_finalize_input = ch_merged_study
         .map { study, chroms, pgen, pvar, psam, sex_update ->
