@@ -12,20 +12,13 @@ trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
 start_time=$(date +%s)
 
 # ── Environment ────────────────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-PROJ_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
-ENV_FILE="${PROJ_ROOT}/.env"
+ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
 if [ ! -f "$ENV_FILE" ]; then
-  echo "ERROR: Root environment file not found: ${ENV_FILE}" >&2
-  echo "       Create ${ENV_FILE}; stage-specific .env files are no longer supported." >&2
-  exit 1
+  echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
-set -a
 # shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+set -a; source "$ENV_FILE"; set +a
+PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 SOURCE_ROOT="/data/Epic/subprojects/Genetics/sources/Gwas"
 DEST_ROOT="data/genetics"

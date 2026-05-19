@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=000_tools
-#SBATCH --output=logs/000_tools.out
-#SBATCH --error=logs/000_tools.err
+#SBATCH --output=src/logs/000_tools.out
+#SBATCH --error=src/logs/000_tools.err
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=10:00:00
@@ -12,22 +12,13 @@ trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
 start_time=$(date +%s)
 
 # ── Environment ────────────────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-PROJ_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
-ENV_FILE="${PROJ_ROOT}/.env"
+ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
 if [ ! -f "$ENV_FILE" ]; then
-  echo "ERROR: Root environment file not found: ${ENV_FILE}" >&2
-  echo "       Create ${ENV_FILE}; stage-specific .env files are no longer supported." >&2
-  exit 1
+  echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
-set -a
 # shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+set -a; source "$ENV_FILE"; set +a
 
-TOOLS_DIR="${TOOLS_DIR:-${PROJ_ROOT}/tools}"
 IMG_DIR="${TOOLS_DIR}/singularity_images"
 BIN_DIR="${TOOLS_DIR}/bin"
 SRC_DIR="${TOOLS_DIR}/src"
@@ -246,9 +237,25 @@ if [ -d "${TOOLS_DIR}/triple-liftOver" ]; then
     ln -sf "${BIN_DIR}/liftOver" "${TOOLS_DIR}/triple-liftOver/library/liftOver"
 fi
 
-# ── 4. Verification ────────────────────────────────────────────────────────────
+# ── 4. R Packages ─────────────────────────────────────────────────────────────
 echo ""
-echo "[4/4] Verifying tools in ${BIN_DIR}..."
+echo "[4/5] Installing R packages to ${R_LIBS}..."
+mkdir -p "${R_LIBS}"
+
+R_PKGS=(haven)
+for pkg in "${R_PKGS[@]}"; do
+    if ! Rscript -e "if (!requireNamespace('${pkg}', quietly=TRUE)) stop('missing')" 2>/dev/null; then
+        echo "  Installing R package: ${pkg}"
+        Rscript -e "install.packages('${pkg}', lib='${R_LIBS}', repos='https://cloud.r-project.org', quiet=TRUE)"
+        echo "  ✓ ${pkg}"
+    else
+        echo "  ✓ ${pkg} (already installed)"
+    fi
+done
+
+# ── 5. Verification ────────────────────────────────────────────────────────────
+echo ""
+echo "[5/5] Verifying tools in ${BIN_DIR}..."
 FAILURES=0
 
 # List of tools to check specifically in bin/

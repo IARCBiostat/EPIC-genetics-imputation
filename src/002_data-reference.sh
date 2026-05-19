@@ -1,24 +1,22 @@
 #!/bin/bash
-# Script: src/002_data-reference.sh
-# Purpose: Download 1000 Genomes reference data into data/reference/
+#SBATCH --job-name=002_data-reference
+#SBATCH --output=src/logs/002_data-reference.out
+#SBATCH --error=src/logs/002_data-reference.err
+#SBATCH --time=10-00:00:00
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=2
+#SBATCH --partition=low_p
 
 set -euo pipefail
 
 # Root-only environment sourcing
-SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-PROJ_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
-ENV_FILE="${PROJ_ROOT}/.env"
+ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
 if [ ! -f "$ENV_FILE" ]; then
-  echo "ERROR: Root environment file not found: ${ENV_FILE}" >&2
-  echo "       Create ${ENV_FILE}; stage-specific .env files are no longer supported." >&2
-  exit 1
+  echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
-set -a
 # shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+set -a; source "$ENV_FILE"; set +a
+PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 # Defaults (if not in .env)
 TOOLS_DIR="${TOOLS_DIR:-${PROJ_ROOT}/tools}"

@@ -28,56 +28,7 @@
 set -euo pipefail
 trap 'echo "ERROR: Stage-1 processing failed on line $LINENO" >&2; exit 1' ERR
 
-SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-SCRIPT_PATH="${SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]:-$0}")"
-DEFAULT_PROJ_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
-
-is_repo_root() {
-  local candidate="$1"
-  [ -d "${candidate}/src" ] && \
-  [ -d "${candidate}/pipeline_stage1/scripts" ] && \
-  [ -f "${candidate}/pipeline_stage1/main.nf" ]
-}
-
-source_root_env() {
-  local root="$1"
-  local env_file="${root}/.env"
-
-  if [ ! -f "$env_file" ]; then
-    echo "ERROR: Root environment file not found: ${env_file}" >&2
-    echo "       Create ${env_file}; stage-specific .env files are no longer supported." >&2
-    return 1
-  fi
-
-  set -a
-  # shellcheck disable=SC1090
-  source "$env_file"
-  set +a
-}
-
-resolve_project_root() {
-  local candidates=()
-  [ -n "${SLURM_SUBMIT_DIR:-}" ] && candidates+=("${SLURM_SUBMIT_DIR}")
-  candidates+=("${SCRIPT_DIR}/.." "$(pwd)")
-  [ -n "${GENETICS_PROJECT_ROOT:-}" ] && candidates+=("${GENETICS_PROJECT_ROOT}")
-  candidates+=("${DEFAULT_PROJ_ROOT}")
-
-  local candidate
-  local resolved
-  for candidate in "${candidates[@]}"; do
-    [ -z "$candidate" ] && continue
-    if resolved="$(cd "$candidate" 2>/dev/null && pwd)"; then
-      if is_repo_root "$resolved"; then
-        printf '%s\n' "$resolved"
-        return 0
-      fi
-    fi
-  done
-
-  echo "ERROR: Could not resolve the EPIC genetics repo root." >&2
-  echo "       Tried SLURM_SUBMIT_DIR, script parent, current directory, and GENETICS_PROJECT_ROOT." >&2
-  return 1
-}
+SCRIPT_PATH="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)/$(basename -- "${BASH_SOURCE[0]:-$0}")"
 
 resolve_data_root() {
   local candidate
@@ -121,10 +72,13 @@ resolve_epic_file() {
   return 1
 }
 
-PROJ_ROOT="$(resolve_project_root)"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
-source_root_env "$PROJ_ROOT"
-export GENETICS_PROJECT_ROOT="${PROJ_ROOT}"
+ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
+fi
+# shellcheck disable=SC1090
+set -a; source "$ENV_FILE"; set +a
+PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 if [ -z "${SLURM_JOB_ID:-}" ]; then
   mkdir -p "${PROJ_ROOT}/src/logs"
