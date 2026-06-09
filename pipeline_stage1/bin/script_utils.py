@@ -360,6 +360,7 @@ def liftover_to_hg38(
     cwd: Path,
 ) -> None:
     source_build = _source_build_name(build)
+    output_prefix.parent.mkdir(parents=True, exist_ok=True)
     if source_build == "hg38":
         move_prefix(source_prefix, output_prefix, cwd)
         return
@@ -426,11 +427,14 @@ def liftover_to_hg38(
         remove_prefix(pos_prefix, cwd)
         split_source = flip_prefix
 
+    tmp_output = lift_dir / output_prefix.name
     run(
-        plink_cmd(plink, f"--bfile {q(split_source)} --split-x b38 no-fail --make-bed --out {q(output_prefix)}"),
+        plink_cmd(plink, f"--bfile {q(split_source)} --split-x b38 no-fail --make-bed --out {q(tmp_output)}"),
         cwd,
     )
     remove_prefix(split_source, cwd)
+    output_prefix.parent.mkdir(parents=True, exist_ok=True)
+    move_prefix(tmp_output, output_prefix, cwd)
 
     write_summary(
         summary,

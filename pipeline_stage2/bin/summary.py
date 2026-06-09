@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 BIN_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BIN_DIR.parents[1]
 if str(BIN_DIR) not in sys.path:
     sys.path.insert(0, str(BIN_DIR))
 

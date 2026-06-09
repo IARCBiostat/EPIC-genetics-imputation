@@ -190,6 +190,14 @@ process STAGE1_QC {
     QC_DIR="${params.outdir}/${study}/stage1/qc"
     mkdir -p "\${QC_DIR}"
 
+    # Hard-link stage1 pfiles into task dir so containerised plink (v1.9) can access them.
+    # Falls back to cp if source and task dir are on different filesystems.
+    INPUT_ABS="\${INPUT}"
+    for ext in bed bim fam; do
+        ln "\${INPUT_ABS}.\${ext}" "./${study}.\${ext}" 2>/dev/null || cp "\${INPUT_ABS}.\${ext}" "./${study}.\${ext}"
+    done
+    INPUT="${study}"
+
     N_INIT_SAMPLES=\$(wc -l < "\${INPUT}.fam" | tr -d ' ')
     N_INIT_VARS=\$(wc -l < "\${INPUT}.bim" | tr -d ' ')
 
@@ -199,7 +207,7 @@ process STAGE1_QC {
         if ${params.plink_bin} --bfile "\${INPUT}" \\
                 --check-sex ${params.sex_check_f_female} ${params.sex_check_f_male} \\
                 --out sex_check; then
-            awk 'NR>1 && \$5=="PROBLEM" && (\$4==1 || \$4==2) {print \$1, \$2}' \\
+            awk 'NR>1 && \$5=="PROBLEM" && (\$3==1 || \$3==2) {print \$1, \$2}' \\
                 sex_check.sexcheck > sex_mismatch.id
         else
             : > sex_mismatch.id
@@ -210,9 +218,15 @@ process STAGE1_QC {
     N_SEX_MISMATCH=\$(wc -l < sex_mismatch.id | tr -d ' ')
 
     # --- Heterozygosity outliers (LD-pruned autosomes) ---
+    # plink2 requires >=50 samples for LD estimation; use --bad-ld for smaller studies
+    N_SAMPLES_LD=\$(wc -l < "\${INPUT}.fam" | tr -d ' ')
+    BAD_LD_OPT=""
+    [ "\${N_SAMPLES_LD}" -lt 50 ] && BAD_LD_OPT="--bad-ld"
+
     ${params.plink2_bin} --bfile "\${INPUT}" \\
         --chr 1-22 \\
         --indep-pairwise 1500 150 0.2 \\
+        \${BAD_LD_OPT} \\
         --threads ${threads} \\
         --out pruned
 
@@ -240,7 +254,7 @@ process STAGE1_QC {
 
     [ -f king.kin0 ] || : > king.kin0
     if [ -s king.kin0 ]; then
-        ${params.plink2_bin} --king-cutoff-table king.kin0 ${params.king_duplicate_cutoff} --out king_dupes
+        ${params.plink2_bin} --bfile "\${INPUT}" --king-cutoff-table king.kin0 ${params.king_duplicate_cutoff} --out king_dupes
     else
         : > king_dupes.king.cutoff.out.id
     fi
@@ -255,10 +269,35 @@ process STAGE1_QC {
     REMOVE_OPT=""
     [ -s samples_to_remove.id ] && REMOVE_OPT="--remove samples_to_remove.id"
 
+    # HWE midp on autosomes only: plink2 segfaults computing chrX midp with het haploid genotypes
     ${params.plink2_bin} --bfile "\${INPUT}" \\
         \${REMOVE_OPT} \\
+        --autosome \\
         --hwe ${params.hwe_p} midp \\
         --maf ${params.maf_phasing} \\
+        --write-snplist \\
+        --threads ${threads} \\
+        --out autosome_pass
+
+    # chrX: MAF filter only (no HWE)
+    HAS_X=\$(awk '\$1=="X" || \$1=="23" {found=1; exit} END {print found+0}' "\${INPUT}.bim")
+    if [ "\${HAS_X}" -eq 1 ]; then
+        ${params.plink2_bin} --bfile "\${INPUT}" \\
+            \${REMOVE_OPT} \\
+            --chr X \\
+            --maf ${params.maf_phasing} \\
+            --write-snplist \\
+            --threads ${threads} \\
+            --out chrX_pass
+    else
+        : > chrX_pass.snplist
+    fi
+
+    cat autosome_pass.snplist chrX_pass.snplist | sort -u > pass_variants.snplist
+
+    ${params.plink2_bin} --bfile "\${INPUT}" \\
+        \${REMOVE_OPT} \\
+        --extract pass_variants.snplist \\
         --threads ${threads} \\
         --make-bed \\
         --out ${study}
@@ -276,9 +315,9 @@ process STAGE1_QC {
     } > "\${QC_DIR}/${study}.stage1_qc.tsv"
 
     # Overwrite stage1 BED/BIM/FAM with QC-filtered versions
-    cp ${study}.bed "\${INPUT}.bed"
-    cp ${study}.bim "\${INPUT}.bim"
-    cp ${study}.fam "\${INPUT}.fam"
+    cp ${study}.bed "\${INPUT_ABS}.bed"
+    cp ${study}.bim "\${INPUT_ABS}.bim"
+    cp ${study}.fam "\${INPUT_ABS}.fam"
 
     printf "study\\tstep\\n%s\\tstage1_qc\\n" "${study}" > ${study}.stage1_qc.done
     """

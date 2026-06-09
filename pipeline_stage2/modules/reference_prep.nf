@@ -10,7 +10,7 @@ process PREP_REFERENCE {
     val chr
 
     output:
-    tuple val(chr), path("*.msav"), path("*.bcf*")
+    tuple val(chr), path("*.msav*"), path("*.bcf*")
 
     script:
     def vcf_prefix = chr == 'X' ? 
@@ -26,11 +26,13 @@ process PREP_REFERENCE {
         \$BCFTOOLS_BIN norm --no-version -Ob \\
             -o 1kGP_panel_chr${chr}.bcf \\
             -d none -f ${params.fasta_ref}
-            
+
         \$BCFTOOLS_BIN index -f 1kGP_panel_chr${chr}.bcf
 
-        # 2. Compress to MSAV format for Minimac4
-        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chr${chr}.bcf > 1kGP_panel_chr${chr}.msav
+        # 2. Compress to MSAV format for Minimac4.
+        # Use -o (seekable file) so minimac4 can write an embedded index;
+        # piping to stdout produces an unindexed file that imputation rejects.
+        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chr${chr}.bcf -o 1kGP_panel_chr${chr}.msav
         """
     else
         """
@@ -42,20 +44,20 @@ process PREP_REFERENCE {
         \$BCFTOOLS_BIN norm --no-version -Ou -m -any | \\
         \$BCFTOOLS_BIN norm --no-version -Ob -o 1kGP_panel_chrX.PAR1.bcf -d none -f ${params.fasta_ref}
         \$BCFTOOLS_BIN index -f 1kGP_panel_chrX.PAR1.bcf
-        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chrX.PAR1.bcf > 1kGP_panel_chrX.PAR1.msav
+        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chrX.PAR1.bcf -o 1kGP_panel_chrX.PAR1.msav
 
         # 2. Prep nonPAR (2781514-155700882)
         \$BCFTOOLS_BIN view --no-version -c 10 -v snps,indels -r chrX:2781514-155700882 ${params.ref_1000g_dir}/${vcf_prefix}.vcf.gz | \\
         \$BCFTOOLS_BIN norm --no-version -Ou -m -any | \\
         \$BCFTOOLS_BIN norm --no-version -Ob -o 1kGP_panel_chrX.nonPAR.bcf -d none -f ${params.fasta_ref}
         \$BCFTOOLS_BIN index -f 1kGP_panel_chrX.nonPAR.bcf
-        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chrX.nonPAR.bcf > 1kGP_panel_chrX.nonPAR.msav
+        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chrX.nonPAR.bcf -o 1kGP_panel_chrX.nonPAR.msav
 
         # 3. Prep PAR2 (155700883-)
         \$BCFTOOLS_BIN view --no-version -c 10 -v snps,indels -r chrX:155700883- ${params.ref_1000g_dir}/${vcf_prefix}.vcf.gz | \\
         \$BCFTOOLS_BIN norm --no-version -Ou -m -any | \\
         \$BCFTOOLS_BIN norm --no-version -Ob -o 1kGP_panel_chrX.PAR2.bcf -d none -f ${params.fasta_ref}
         \$BCFTOOLS_BIN index -f 1kGP_panel_chrX.PAR2.bcf
-        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chrX.PAR2.bcf > 1kGP_panel_chrX.PAR2.msav
+        \$MINIMAC4_BIN --compress-reference 1kGP_panel_chrX.PAR2.bcf -o 1kGP_panel_chrX.PAR2.msav
         """
 }

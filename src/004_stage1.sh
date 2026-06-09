@@ -72,7 +72,7 @@ resolve_epic_file() {
   return 1
 }
 
-ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
@@ -119,7 +119,7 @@ if [[ "${PLINK_BIN}" == */* ]]; then
 fi
 export PLINK_BIN
 DATA_ROOT="$(resolve_data_root)"
-WORK_ROOT="${STAGE1_WORK_ROOT:-$PROJ_ROOT/pipeline_stage1/work}"
+WORK_ROOT="${STAGE1_WORK_ROOT:-${SCRATCH_RUN}/stage1/work}"
 SCRIPTS_DIR="${PROJ_ROOT}/pipeline_stage1/scripts"
 EPIC_ID_FILE="$(resolve_epic_file "Subj_Id_2015.txt")"
 EPIC_CASE_STATUS_FILE="${EPIC_CASE_STATUS_FILE:-$(resolve_epic_file "EPIC_study_case_status.txt")}"
@@ -165,7 +165,6 @@ DATASET_SCRIPTS=(
   "process_panc_01.py"
   "process_panc_02.py"
   "process_pros_01.py"
-  "process_pros_02.py"
   "process_pros_03.py"
   "process_pros_04.py"
   "process_stom_01.py"
@@ -191,7 +190,8 @@ DATASET_SCRIPTS=("${NORMALIZED_SCRIPTS[@]}")
 
 mkdir -p "$WORK_ROOT"
 mkdir -p "${PROJ_ROOT}/src/logs"
-cd "$PROJ_ROOT"
+mkdir -p "${SCRATCH_RUN}/stage1"
+cd "${SCRATCH_RUN}/stage1"
 
 for cmd_name in "${PYTHON3_BIN}" "${PYTHON2_BIN}" "${PLINK_BIN}" perl nextflow; do
   if ! command -v "$cmd_name" >/dev/null 2>&1; then
@@ -235,7 +235,7 @@ echo "=========================================="
 
 if [ -n "${STAGE1_STUDY:-}" ]; then
   STUDY_LIST="${STAGE1_STUDY}"
-elif [ -n "${STAGE1_SCRIPTS:-}" ]; then
+else
   STUDY_IDS=()
   for script_name in "${DATASET_SCRIPTS[@]}"; do
     script_path="${SCRIPTS_DIR}/${script_name}"
@@ -251,12 +251,10 @@ elif [ -n "${STAGE1_SCRIPTS:-}" ]; then
     STUDY_IDS+=("${study_id}")
   done
   STUDY_LIST="$(IFS=,; echo "${STUDY_IDS[*]}")"
-else
-  STUDY_LIST="all"
 fi
 
-OUTDIR="${STAGE1_OUTDIR:-${PROJ_ROOT}/analysis}"
-NEXTFLOW_WORKDIR="${STAGE1_NEXTFLOW_WORKDIR:-${PROJ_ROOT}/pipeline_stage1/.nextflow_work}"
+OUTDIR="${STAGE1_OUTDIR:-${SCRATCH_RUN}/studies}"
+NEXTFLOW_WORKDIR="${STAGE1_NEXTFLOW_WORKDIR:-${SCRATCH_RUN}/stage1/nxf-work}"
 PROFILE="${STAGE1_PROFILE:-slurm}"
 PARAMS_FILE="${PROJ_ROOT}/pipeline_stage1/params.yaml"
 RESUME="${STAGE1_RESUME:-1}"
@@ -271,10 +269,12 @@ NF_CMD=(
   --study "${STUDY_LIST}"
   --data_root "${DATA_ROOT}"
   --outdir "${OUTDIR}"
+  --pipeline_info_dir "${SCRATCH_RUN}/stage1/pipeline_info"
   --work_root "${WORK_ROOT}"
   --python3_bin "${PYTHON3_BIN}"
   --python2_bin "${PYTHON2_BIN}"
   --plink_bin "${PLINK_BIN}"
+  --plink2_bin "${PLINK2_BIN}"
 )
 
 if [ "${RESUME}" = "1" ] && [ "${STAGE1_FORCE}" != "1" ]; then

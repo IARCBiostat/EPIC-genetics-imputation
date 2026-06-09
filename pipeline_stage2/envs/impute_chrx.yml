@@ -4,6 +4,7 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - bcftools
-  - shapeit5
+  - python=3.12
+  - bcftools=1.21
+  - shapeit5=5.1.1
   - minimac4=4.1.6

@@ -162,20 +162,8 @@ def fallback_png(path: Path) -> None:
     path.write_bytes(base64.b64decode(data))
 
 
-def final_paths(stage_dir: Path, study: str) -> tuple[Path, Path, Path]:
-    final_dir = stage_dir / "final"
-    candidates = (
-        final_dir / f"{study}.pgen",
-        final_dir / f"{study}.pvar",
-        final_dir / f"{study}.psam",
-    )
-    if any(path.exists() for path in candidates):
-        return candidates
-    return (
-        stage_dir / f"{study}.pgen",
-        stage_dir / f"{study}.pvar",
-        stage_dir / f"{study}.psam",
-    )
+def archive_path(stage_dir: Path, study: str) -> Path:
+    return stage_dir / f"{study}.stage3.tar.gz"
 
 
 def summarize_variant_metrics(tables_dir: Path) -> tuple[list[dict[str, object]], dict[str, int]]:
@@ -187,9 +175,9 @@ def summarize_variant_metrics(tables_dir: Path) -> tuple[list[dict[str, object]]
         "duplicate_rsid_fallbacks": 0,
         "post_r2_maf_variants": 0,
         "removed_r2_maf_variants": 0,
-        "post_hwe_variants": 0,
-        "removed_hwe_variants": 0,
+        "hwe_exclude_count": 0,
         "hwe_chromosomes": 0,
+        "hwe_no_controls_chromosomes": 0,
     }
 
     for path in sorted(tables_dir.glob("*.variant_metrics.tsv"), key=lambda item: chrom_sort_key(chrom_from_path(item))):
@@ -202,10 +190,10 @@ def summarize_variant_metrics(tables_dir: Path) -> tuple[list[dict[str, object]]
         fallback_variants = int_value(source, "fallback_variants")
         duplicate_rsid_fallbacks = int_value(source, "duplicate_rsid_fallbacks")
         post_r2_maf = int_value(source, "post_r2_maf_variants")
-        post_hwe = int_value(source, "final_variants")
         hwe_applied = int_value(source, "hwe_applied")
+        hwe_no_controls = int_value(source, "hwe_no_controls")
+        hwe_exclude = int_value(source, "hwe_exclude_count")
         removed_r2_maf = max(input_variants - post_r2_maf, 0)
-        removed_hwe = max(post_r2_maf - post_hwe, 0)
 
         row = {
             "chromosome": chrom,
@@ -215,17 +203,18 @@ def summarize_variant_metrics(tables_dir: Path) -> tuple[list[dict[str, object]]
             "duplicate_rsid_fallbacks": duplicate_rsid_fallbacks,
             "post_r2_maf_variants": post_r2_maf,
             "removed_r2_maf_variants": removed_r2_maf,
-            "post_hwe_variants": post_hwe,
-            "removed_hwe_variants": removed_hwe,
+            "hwe_exclude_count": hwe_exclude,
             "hwe_applied": hwe_applied,
+            "hwe_no_controls": hwe_no_controls,
         }
         rows.append(row)
 
         for key in totals:
-            if key == "hwe_chromosomes":
+            if key in ("hwe_chromosomes", "hwe_no_controls_chromosomes"):
                 continue
             totals[key] += int_value(row, key)
         totals["hwe_chromosomes"] += 1 if hwe_applied else 0
+        totals["hwe_no_controls_chromosomes"] += 1 if hwe_no_controls else 0
 
     return rows, totals
 
@@ -268,12 +257,12 @@ def build_filter_steps(
             "details": f"Configured filter: INFO/R2 >= {min_r2} and INFO/MAF >= {maf}.",
         },
         {
-            "component": "Hardy-Weinberg filter",
+            "component": "Hardy-Weinberg exclusion list",
             "measurement": "variants",
             "input_count": variant_totals["post_r2_maf_variants"],
-            "output_count": variant_totals["post_hwe_variants"],
-            "filtered_count": variant_totals["removed_hwe_variants"],
-            "details": f"Applied to autosomes where enabled using PLINK HWE p <= {hwe_p}; chromosome X is excluded.",
+            "output_count": variant_totals["post_r2_maf_variants"],
+            "filtered_count": variant_totals["hwe_exclude_count"],
+            "details": f"HWE assessed on controls only (autosomes, p <= {hwe_p}; chromosome X excluded). Failing variants are written to hwe.exclude for downstream use — no hard filter applied.",
         },
         {
             "component": "Sample review",
@@ -281,15 +270,15 @@ def build_filter_steps(
             "input_count": pre_final_samples,
             "output_count": final_samples if final_samples is not None else "",
             "filtered_count": total_removed,
-            "details": "Union of sex mismatch, relatedness, heterozygosity, and configured ancestry exclusions.",
+            "details": "Union of relatedness, heterozygosity, and configured ancestry exclusions.",
         },
     ]
 
 
 def build_sample_filter_rows(sample_row: dict[str, str]) -> list[dict[str, object]]:
     rows = [
-        ("Sex mismatch", "sex_mismatch", "Samples flagged by PLINK sex check."),
-        ("Relatedness", "related_removed", "Samples selected for removal by KING relatedness cutoff."),
+        ("Relatedness identified", "related_identified", "Samples identified by KING relatedness cutoff (always computed)."),
+        ("Relatedness removed", "related_removed", "Samples removed due to relatedness (only when --related true is set)."),
         ("Heterozygosity", "heterozygosity_outliers", "Samples outside the configured heterozygosity threshold."),
         ("Ancestry identified", "ancestry_outliers_identified", "Samples outside the configured PCA ancestry threshold."),
         ("Ancestry removed", "ancestry_outliers_removed", "Ancestry outliers added to the removal list when configured."),
@@ -316,16 +305,15 @@ def write_counts_figure(
         import matplotlib.pyplot as plt
 
         fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
-        variant_labels = ["Input", "Post R2/MAF", "Final"]
+        variant_labels = ["Input", "Post R2/MAF"]
         variant_values = [
             variant_totals["input_variants"],
             variant_totals["post_r2_maf_variants"],
-            variant_totals["post_hwe_variants"],
         ]
         sample_labels = ["Pre-review", "Final"]
         sample_values = [pre_final_samples, final_samples or 0]
 
-        axes[0].bar(variant_labels, variant_values, color=["#4b5563", "#2563eb", "#059669"])
+        axes[0].bar(variant_labels, variant_values, color=["#4b5563", "#059669"])
         axes[0].set_title("Variant filtering")
         axes[0].set_ylabel("Variants")
         axes[0].tick_params(axis="x", labelrotation=25)
@@ -482,7 +470,7 @@ footer {{ border-top: 1px solid #d8dee4; color: #6b7280; font-size: 12px; margin
 <div class="metric"><span>Final Samples</span><strong>{fmt_cell(metrics_row.get("samples"))}</strong></div>
 <div class="metric"><span>Final Variants</span><strong>{fmt_cell(metrics_row.get("variants"))}</strong></div>
 <div class="metric"><span>R2/MAF Filtered Variants</span><strong>{fmt_cell(metrics_row.get("removed_r2_maf_variants"))}</strong></div>
-<div class="metric"><span>HWE Filtered Variants</span><strong>{fmt_cell(metrics_row.get("removed_hwe_variants"))}</strong></div>
+<div class="metric"><span>HWE Exclusion List</span><strong>{fmt_cell(metrics_row.get("hwe_exclude_count"))}</strong></div>
 <div class="metric"><span>Total Samples Removed</span><strong>{fmt_cell(metrics_row.get("total_removed"))}</strong></div>
 </div>
 </section>
@@ -495,8 +483,8 @@ footer {{ border-top: 1px solid #d8dee4; color: #6b7280; font-size: 12px; margin
 
 <section>
 <h2>Variant Filtering By Chromosome</h2>
-<p class="note">Table 2. Per-chromosome post-imputation variant counts. The R2/MAF columns describe the imputation-quality and allele-frequency filter; the HWE columns describe the autosomal Hardy-Weinberg filter applied after R2/MAF filtering.</p>
-{render_table(variant_rows, ["chromosome", "input_variants", "rsid_variants", "fallback_variants", "duplicate_rsid_fallbacks", "post_r2_maf_variants", "removed_r2_maf_variants", "post_hwe_variants", "removed_hwe_variants", "hwe_applied"])}
+<p class="note">Table 2. Per-chromosome post-imputation variant counts. The R2/MAF columns describe the imputation-quality and allele-frequency filter; hwe_exclude_count is the number of variants written to the per-study hwe.exclude file (no hard filter is applied).</p>
+{render_table(variant_rows, ["chromosome", "input_variants", "rsid_variants", "fallback_variants", "duplicate_rsid_fallbacks", "post_r2_maf_variants", "removed_r2_maf_variants", "hwe_exclude_count", "hwe_applied", "hwe_no_controls"])}
 </section>
 
 <section>
@@ -529,19 +517,14 @@ def generate_study_report(analysis_root: Path, study: str) -> dict[str, object]:
     manifests_dir = ensure_dir(report_dir / "manifests")
     cleanup_stale_report_outputs(report_dir)
 
-    final_pgen, final_pvar, final_psam = final_paths(stage_dir, study)
     variant_rows, variant_totals = summarize_variant_metrics(tables_dir)
     sample_review_path = tables_dir / f"{study}.sample_review.tsv"
     sample_row = read_first_tsv_row(sample_review_path)
 
     pre_final_samples = int_value(sample_row, "pre_final_samples")
     total_removed = int_value(sample_row, "total_removed")
-    samples = count_non_header_lines(final_psam)
-    if samples is None and pre_final_samples:
-        samples = max(pre_final_samples - total_removed, 0)
-    variants = count_non_header_lines(final_pvar)
-    if variants is None:
-        variants = variant_totals["post_hwe_variants"] or None
+    samples = max(pre_final_samples - total_removed, 0) if pre_final_samples else None
+    variants = variant_totals["post_r2_maf_variants"] or None
 
     metrics_row = {
         "study": study,
@@ -549,14 +532,13 @@ def generate_study_report(analysis_root: Path, study: str) -> dict[str, object]:
         "variants": variants if variants is not None else "",
         "input_variants": variant_totals["input_variants"],
         "post_r2_maf_variants": variant_totals["post_r2_maf_variants"],
-        "post_hwe_variants": variant_totals["post_hwe_variants"],
         "removed_r2_maf_variants": variant_totals["removed_r2_maf_variants"],
-        "removed_hwe_variants": variant_totals["removed_hwe_variants"],
+        "hwe_exclude_count": variant_totals["hwe_exclude_count"],
         "rsid_variants": variant_totals["rsid_variants"],
         "fallback_variants": variant_totals["fallback_variants"],
         "duplicate_rsid_fallbacks": variant_totals["duplicate_rsid_fallbacks"],
         "hwe_chromosomes": variant_totals["hwe_chromosomes"],
-        "sex_mismatch": sample_row.get("sex_mismatch", ""),
+        "related_identified": sample_row.get("related_identified", ""),
         "related_removed": sample_row.get("related_removed", ""),
         "heterozygosity_outliers": sample_row.get("heterozygosity_outliers", ""),
         "ancestry_outliers_identified": sample_row.get("ancestry_outliers_identified", ""),
@@ -578,9 +560,9 @@ def generate_study_report(analysis_root: Path, study: str) -> dict[str, object]:
         "duplicate_rsid_fallbacks",
         "post_r2_maf_variants",
         "removed_r2_maf_variants",
-        "post_hwe_variants",
-        "removed_hwe_variants",
+        "hwe_exclude_count",
         "hwe_applied",
+        "hwe_no_controls",
     ]
     write_tsv(filter_steps, tables_dir / "stage3_filter_steps.tsv", ["component", "measurement", "input_count", "output_count", "filtered_count", "details"])
     write_tsv(variant_rows, tables_dir / "stage3_variant_filters.tsv", variant_columns)
@@ -596,9 +578,9 @@ def generate_study_report(analysis_root: Path, study: str) -> dict[str, object]:
         flags.append({"study": study, "level": "WARN", "message": "No per-chromosome variant metrics were found."})
     if not sample_row:
         flags.append({"study": study, "level": "WARN", "message": "No sample review metrics were found."})
-    for path in (final_pgen, final_pvar, final_psam):
-        if not path.exists():
-            flags.append({"study": study, "level": "WARN", "message": f"Final file not found while reporting: {project_relative(path)}"})
+    study_archive = archive_path(stage_dir, study)
+    if not study_archive.exists():
+        flags.append({"study": study, "level": "WARN", "message": f"Stage 3 archive not found: {project_relative(study_archive)}"})
     write_tsv(flags, flags_dir / "stage3_flags.tsv", ["study", "level", "message"])
     write_tsv(flags, flags_dir / f"{study}_stage3_flags.tsv", ["study", "level", "message"])
 

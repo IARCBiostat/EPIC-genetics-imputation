@@ -21,7 +21,7 @@ if command -v mamba >/dev/null 2>&1; then
 fi
 
 echo "Creating environment '${ENV_NAME}'..."
-$CONDA_CMD create -n ${ENV_NAME} -c conda-forge -c bioconda nextflow openjdk=21 python=3.9 -y
+$CONDA_CMD create -n ${ENV_NAME} -c conda-forge -c bioconda nextflow openjdk=21 python=3.9 r-base r-haven -y
 
 echo "=========================================="
 echo "Setup complete. Activate with: 'conda activate ${ENV_NAME}'"

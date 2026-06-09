@@ -12,6 +12,7 @@ from pathlib import Path
 EXPECTED_CHROMS = [str(chrom) for chrom in range(1, 23)] + ["X"]
 RSID_RE = re.compile(r"^rs[0-9]+$", re.IGNORECASE)
 CHRPOS_RE = re.compile(r"^(?:chr)?[^:]+:\d+:[^:]+:[^:]+$")
+STAGE2_VCF_RE = re.compile(r"^.+_chr([0-9X]+)_GxS\.imputed\.vcf\.gz$")
 
 
 @dataclass
@@ -22,17 +23,18 @@ class StudySummary:
     final_variants: int | None
     input_variants: int
     post_r2_maf_variants: int
-    post_hwe_variants: int
+    hwe_exclude_variants: int
     rsid_variants: int
     fallback_variants: int
     duplicate_rsid_fallbacks: int
-    sex_mismatch: int
+    related_identified: int
     related_removed: int
     heterozygosity_outliers: int
     ancestry_identified: int
     ancestry_removed: int
     total_removed: int
     variant_qc_files: int
+    hwe_no_controls: bool
     complete: bool
     status: str
 
@@ -61,45 +63,6 @@ def count_non_header_lines(path: Path) -> int | None:
         return sum(1 for line in handle if line.strip() and not line.startswith("#"))
 
 
-def classify_variant_id(value: str) -> str:
-    if value in {"", "."}:
-        return "missing"
-    if RSID_RE.match(value):
-        return "rsid"
-    if CHRPOS_RE.match(value):
-        return "fallback"
-    return "other"
-
-
-def summarize_final_pvar(path: Path) -> tuple[int | None, int, int, int]:
-    if not path.exists():
-        return None, 0, 0, 0
-
-    variant_count = 0
-    rsid_count = 0
-    fallback_count = 0
-    other_count = 0
-
-    with path.open() as handle:
-        for line in handle:
-            if not line.strip() or line.startswith("#"):
-                continue
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) < 2:
-                continue
-            variant_count += 1
-            variant_id = fields[1]
-            variant_kind = classify_variant_id(variant_id)
-            if variant_kind == "rsid":
-                rsid_count += 1
-            elif variant_kind == "fallback":
-                fallback_count += 1
-            else:
-                other_count += 1
-
-    return variant_count, rsid_count, fallback_count, other_count
-
-
 def count_fam_lines(path: Path) -> int | None:
     if not path.exists():
         return None
@@ -107,31 +70,37 @@ def count_fam_lines(path: Path) -> int | None:
         return sum(1 for line in handle if line.strip())
 
 
-def final_paths(stage3_dir: Path, study_id: str) -> tuple[Path, Path, Path]:
-    final_dir = stage3_dir / "final"
-    nested = (
-        final_dir / f"{study_id}.pgen",
-        final_dir / f"{study_id}.pvar",
-        final_dir / f"{study_id}.psam",
-    )
-    if any(path.exists() for path in nested):
-        return nested
-    return (
-        stage3_dir / f"{study_id}.pgen",
-        stage3_dir / f"{study_id}.pvar",
-        stage3_dir / f"{study_id}.psam",
-    )
+def get_stage2_chroms(stage2_root: Path, study_id: str) -> list[str]:
+    """Return sorted chromosomes present in stage2 VCFs for this study, or EXPECTED_CHROMS if none found."""
+    stage2_dir = stage2_root / study_id / "stage2"
+    if not stage2_dir.exists():
+        return []
+    chroms: set[str] = set()
+    for vcf in stage2_dir.iterdir():
+        m = STAGE2_VCF_RE.match(vcf.name)
+        if m:
+            chroms.add(m.group(1))
+    if not chroms:
+        return []
+
+    def _sort_key(c: str) -> int:
+        return 23 if c == "X" else int(c)
+
+    return sorted(chroms, key=_sort_key)
 
 
 def parse_study_ids(analysis_root: Path, stage1_root: Path, stage2_root: Path, studies_arg: str) -> list[str]:
     if studies_arg != "all":
         return sorted({item.strip() for item in studies_arg.split(",") if item.strip()})
 
-    study_ids = set()
-    study_ids.update(path.parent.name for path in stage1_root.glob("*/stage1") if path.is_dir())
-    study_ids.update(path.parent.name for path in stage2_root.glob("*/stage2") if path.is_dir())
-    study_ids.update(path.parent.name for path in analysis_root.glob("*/stage3") if path.is_dir())
-    return sorted(study_ids)
+    # Stage 1 is the canonical entry point; only studies processed there are expected.
+    # Require the per-study .fam file to exist — this excludes cohort reporting dirs
+    # (analysis/cohort/stage1/) which are created by stage1 reporting but are not studies.
+    return sorted(
+        path.parent.name
+        for path in stage1_root.glob("*/stage1")
+        if path.is_dir() and (path / f"{path.parent.name}.fam").exists()
+    )
 
 
 def load_tsv_row(path: Path) -> dict[str, str] | None:
@@ -144,10 +113,12 @@ def load_tsv_row(path: Path) -> dict[str, str] | None:
     return None
 
 
-def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str) -> StudySummary:
+def collect_study_summary(analysis_root: Path, stage1_root: Path, stage2_root: Path, study_id: str) -> StudySummary:
     stage1_fam = stage1_root / study_id / "stage1" / f"{study_id}.fam"
     stage3_dir = analysis_root / study_id / "stage3"
-    final_pgen, final_pvar, final_psam = final_paths(stage3_dir, study_id)
+    final_dir = stage3_dir / "final"
+
+    study_expected_chroms = get_stage2_chroms(stage2_root, study_id) or EXPECTED_CHROMS
 
     report_tables_dir = stage3_dir / "report" / "tables"
     variant_qc_files = sorted(report_tables_dir.glob("*.variant_metrics.tsv"))
@@ -156,8 +127,11 @@ def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str)
 
     input_variants = 0
     post_r2_maf_variants = 0
-    per_chrom_post_hwe_variants = 0
+    hwe_exclude_variants = 0
     duplicate_rsid_fallbacks = 0
+    rsid_variants = 0
+    fallback_variants = 0
+    hwe_no_controls = False
 
     for path in variant_qc_files:
         row = load_tsv_row(path)
@@ -165,41 +139,39 @@ def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str)
             continue
         input_variants += int(row["input_variants"])
         post_r2_maf_variants += int(row["post_r2_maf_variants"])
-        per_chrom_post_hwe_variants += int(row["final_variants"])
+        hwe_exclude_variants += int(row.get("hwe_exclude_count", 0))
         duplicate_rsid_fallbacks += int(row["duplicate_rsid_fallbacks"])
+        rsid_variants += int(row["rsid_variants"])
+        fallback_variants += int(row["fallback_variants"])
+        if row.get("hwe_no_controls", "0") == "1":
+            hwe_no_controls = True
 
     stage1_samples = count_fam_lines(stage1_fam)
-    stage3_samples = count_non_header_lines(final_psam)
-    if stage3_samples is None and sample_qc_row:
-        pre_final_samples = int(sample_qc_row.get("pre_final_samples", 0) or 0)
-        total_removed_for_fallback = int(sample_qc_row.get("total_removed", 0) or 0)
-        if pre_final_samples:
-            stage3_samples = max(pre_final_samples - total_removed_for_fallback, 0)
-    final_variants, rsid_variants, fallback_variants, other_final_ids = summarize_final_pvar(final_pvar)
-    post_hwe_variants = final_variants if final_variants is not None else per_chrom_post_hwe_variants
 
-    sex_mismatch = int(sample_qc_row.get("sex_mismatch", 0) or 0)
+    pre_final_samples = int(sample_qc_row.get("pre_final_samples", 0) or 0)
+    total_removed_count = int(sample_qc_row.get("total_removed", 0) or 0)
+    stage3_samples = max(pre_final_samples - total_removed_count, 0) if pre_final_samples else None
+
+    final_variants = post_r2_maf_variants if post_r2_maf_variants else None
+
+    related_identified = int(sample_qc_row.get("related_identified", 0) or 0)
     related_removed = int(sample_qc_row.get("related_removed", 0) or 0)
     heterozygosity_outliers = int(sample_qc_row.get("heterozygosity_outliers", 0) or 0)
     ancestry_identified = int(sample_qc_row.get("ancestry_outliers_identified", 0) or 0)
     ancestry_removed = int(sample_qc_row.get("ancestry_outliers_removed", 0) or 0)
     total_removed = int(sample_qc_row.get("total_removed", 0) or 0)
 
+    final_pgen_count = len(list(final_dir.glob("*.pgen"))) if final_dir.exists() else 0
+
     status_parts: list[str] = []
-    if not final_pgen.exists():
-        status_parts.append("pgen-missing")
-    if not final_pvar.exists():
-        status_parts.append("pvar-missing")
-    if not final_psam.exists():
-        status_parts.append("psam-missing")
-    if len(variant_qc_files) != len(EXPECTED_CHROMS):
-        status_parts.append(f"variant-metrics {len(variant_qc_files)}/{len(EXPECTED_CHROMS)}")
+    if final_pgen_count != len(study_expected_chroms):
+        status_parts.append(f"final-pgen {final_pgen_count}/{len(study_expected_chroms)}")
+    if len(variant_qc_files) != len(study_expected_chroms):
+        status_parts.append(f"variant-metrics {len(variant_qc_files)}/{len(study_expected_chroms)}")
     if not sample_qc_path.exists():
         status_parts.append("sample-review-missing")
     if stage1_samples is not None and stage3_samples is not None and stage3_samples > stage1_samples:
         status_parts.append("sample-count-increase")
-    if other_final_ids > 0:
-        status_parts.append(f"other-final-ids {other_final_ids}")
 
     complete = not status_parts
     status = "complete" if complete else "; ".join(status_parts)
@@ -211,17 +183,18 @@ def collect_study_summary(analysis_root: Path, stage1_root: Path, study_id: str)
         final_variants=final_variants,
         input_variants=input_variants,
         post_r2_maf_variants=post_r2_maf_variants,
-        post_hwe_variants=post_hwe_variants,
+        hwe_exclude_variants=hwe_exclude_variants,
         rsid_variants=rsid_variants,
         fallback_variants=fallback_variants,
         duplicate_rsid_fallbacks=duplicate_rsid_fallbacks,
-        sex_mismatch=sex_mismatch,
+        related_identified=related_identified,
         related_removed=related_removed,
         heterozygosity_outliers=heterozygosity_outliers,
         ancestry_identified=ancestry_identified,
         ancestry_removed=ancestry_removed,
         total_removed=total_removed,
         variant_qc_files=len(variant_qc_files),
+        hwe_no_controls=hwe_no_controls,
         complete=complete,
         status=status,
     )
@@ -244,23 +217,29 @@ def build_markdown(analysis_root: Path, summaries: list[StudySummary]) -> str:
     lines.append(f"- Complete stage-3 outputs: {len(complete)}\n")
     lines.append(f"- Incomplete or missing studies: {len(incomplete)}\n")
     lines.append(f"- Total final samples across complete studies: {total_final_samples:,}\n")
-    lines.append(f"- Total final variants across complete studies: {total_final_variants:,}\n\n")
+    lines.append(f"- Total final variants across complete studies: {total_final_variants:,}\n")
+    hwe_skipped = [item for item in summaries if item.hwe_no_controls]
+    if hwe_skipped:
+        skipped_names = ", ".join(item.study_id for item in sorted(hwe_skipped, key=lambda x: x.study_id))
+        lines.append(f"- **Note — HWE exclusion list empty (no controls):** {skipped_names}\n")
+    lines.append("\n")
 
     lines.append("## Complete Studies\n\n")
     if complete:
         lines.append(
-            "| Study | Stage1 Samples | Stage3 Samples | Variants In | Post R2/MAF | Post HWE | Final Variants | rsID | Fallback ID | Sex | Related | Het | Ancestry ID | Ancestry Removed | Total Removed |\n"
+            "| Study | Stage1 Samples | Stage3 Samples | Variants In | Post R2/MAF | HWE Excl | Final Variants | rsID | Fallback ID | Related ID | Related Removed | Het | Ancestry ID | Ancestry Removed | Total Removed | HWE Skip |\n"
         )
         lines.append(
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n"
         )
         for item in sorted(complete, key=lambda value: value.study_id):
+            hwe_skip_flag = "no controls" if item.hwe_no_controls else ""
             lines.append(
                 f"| {item.study_id} | {fmt_int(item.stage1_samples)} | {fmt_int(item.stage3_samples)} | "
-                f"{fmt_int(item.input_variants)} | {fmt_int(item.post_r2_maf_variants)} | {fmt_int(item.post_hwe_variants)} | "
+                f"{fmt_int(item.input_variants)} | {fmt_int(item.post_r2_maf_variants)} | {fmt_int(item.hwe_exclude_variants)} | "
                 f"{fmt_int(item.final_variants)} | {fmt_int(item.rsid_variants)} | {fmt_int(item.fallback_variants)} | "
-                f"{item.sex_mismatch:,} | {item.related_removed:,} | {item.heterozygosity_outliers:,} | "
-                f"{item.ancestry_identified:,} | {item.ancestry_removed:,} | {item.total_removed:,} |\n"
+                f"{item.related_identified:,} | {item.related_removed:,} | {item.heterozygosity_outliers:,} | "
+                f"{item.ancestry_identified:,} | {item.ancestry_removed:,} | {item.total_removed:,} | {hwe_skip_flag} |\n"
             )
         lines.append("\n")
     else:
@@ -281,10 +260,13 @@ def build_markdown(analysis_root: Path, summaries: list[StudySummary]) -> str:
     lines.append("## Notes\n\n")
     lines.append("- `Variants In` is the total count of stage-2 variants entering stage-3 QC.\n")
     lines.append("- `Post R2/MAF` is after imputation-quality and MAF filtering.\n")
-    lines.append("- `Post HWE` uses the final merged `.pvar` count as the authoritative post-HWE variant total.\n")
+    lines.append("- `HWE Excl` is the count of variants written to the per-study `hwe.exclude` file (flagged by autosomal HWE test in controls only); no hard filter is applied — variants pass through and the list is for downstream use.\n")
+    lines.append("- `HWE Skip` is flagged `no controls` for studies where HWE was requested but the stage-1 FAM contains no control samples (phenotype=1); the exclusion list will be empty for these studies.\n")
+    lines.append("- `Final Variants` is the sum of post-R2/MAF variants across all chromosomes (HWE does not reduce this count).\n")
     lines.append("- `rsID` counts final stage-3 variants with a retained dbSNP rsID.\n")
     lines.append("- `Fallback ID` counts final stage-3 variants using `chr:pos:ref:alt` identifiers.\n")
     lines.append("- `Ancestry ID` is always reported; `Ancestry Removed` is only non-zero when ancestry exclusion is enabled.\n")
+    lines.append("- Completeness is determined by the presence of all per-chromosome `.pgen` files in `stage3/final/` and all chromosome variant-metrics files.\n")
     return "".join(lines)
 
 
@@ -296,7 +278,7 @@ def main() -> None:
     output_path = Path(args.output).resolve()
 
     study_ids = parse_study_ids(analysis_root, stage1_root, stage2_root, args.studies)
-    summaries = [collect_study_summary(analysis_root, stage1_root, study_id) for study_id in study_ids]
+    summaries = [collect_study_summary(analysis_root, stage1_root, stage2_root, study_id) for study_id in study_ids]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(build_markdown(analysis_root, summaries))

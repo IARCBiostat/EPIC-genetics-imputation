@@ -12,10 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
-import matplotlib
-
-matplotlib.use("Agg")
-
 
 DEFAULT_STUDIES = [
     "Brea_01_Erneg",
@@ -89,12 +85,15 @@ def parse_studies(studies_arg: str | None, analysis_root: Path | None = None) ->
     if analysis_root is None:
         return DEFAULT_STUDIES.copy()
 
-    discovered: set[str] = set()
-    for stage_name in ("stage1", "stage2", "stage3"):
-        for path in analysis_root.glob(f"*/{stage_name}"):
-            if path.is_dir() and path.parent.name != "cohort":
-                discovered.add(path.parent.name)
-    return sorted(discovered or set(DEFAULT_STUDIES))
+    # Stage 1 is the canonical entry point; only studies processed there are expected.
+    # Require the per-study .fam file to exist — this excludes cohort reporting dirs
+    # (analysis/cohort/stage1/) which are created by stage1 reporting but are not studies.
+    discovered = sorted(
+        path.parent.name
+        for path in analysis_root.glob("*/stage1")
+        if path.is_dir() and (path / f"{path.parent.name}.fam").exists()
+    )
+    return discovered or list(DEFAULT_STUDIES)
 
 
 def utc_timestamp() -> str:

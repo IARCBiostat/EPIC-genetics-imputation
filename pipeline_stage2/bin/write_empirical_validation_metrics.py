@@ -151,7 +151,7 @@ def correlation_squared(x_values: list[float], y_values: list[float]) -> float |
     ss_y = sum((value - y_mean) ** 2 for value in y_values)
     if ss_x <= 0.0 or ss_y <= 0.0:
         return None
-    cov = sum((x_value - x_mean) * (y_value - y_mean) for x_value, y_value in zip(x_values, y_values, strict=True))
+    cov = sum((x_value - x_mean) * (y_value - y_mean) for x_value, y_value in zip(x_values, y_values))
     r = cov / math.sqrt(ss_x * ss_y)
     return max(0.0, min(1.0, r * r))
 
@@ -302,7 +302,7 @@ def write_validation_metrics(
             allele_frequency = total_alt_dosage / total_ploidy if total_ploidy else None
             maf = min(allele_frequency, 1.0 - allele_frequency) if allele_frequency is not None else None
             r2 = correlation_squared(observed, imputed_doses) if len(observed) >= min_samples else None
-            dose0_values = [predicted for truth, predicted in zip(observed, imputed_doses, strict=True) if truth == 0.0]
+            dose0_values = [predicted for truth, predicted in zip(observed, imputed_doses) if truth == 0.0]
             dose0 = sum(dose0_values) / len(dose0_values) if len(dose0_values) >= min_dose0_samples else None
             mean_observed = sum(observed) / len(observed)
             mean_imputed = sum(imputed_doses) / len(imputed_doses)

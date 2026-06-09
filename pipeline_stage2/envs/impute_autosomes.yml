@@ -4,5 +4,5 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - bcftools
+  - bcftools=1.21
   - minimac4=4.1.6

@@ -12,6 +12,7 @@
 !/pipeline_stage1/
 !/pipeline_stage2/
 !/pipeline_stage3/
+!/pipeline_stage4/
 !/src/
 
 # Exclude specific sub-directories and files within allowed paths
@@ -28,6 +29,10 @@
 /pipeline_stage3/conda/
 /pipeline_stage3/.nextflow/
 /pipeline_stage3/.nextflow.log*
+/pipeline_stage4/work/
+/pipeline_stage4/conda/
+/pipeline_stage4/.nextflow/
+/pipeline_stage4/.nextflow.log*
 
 # Global ignores (even in allowed paths)
 .DS_Store

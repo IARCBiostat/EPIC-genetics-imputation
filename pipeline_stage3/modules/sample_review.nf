@@ -1,28 +1,28 @@
-process MERGE_STUDY {
+process MERGE_FOR_QC {
     label 'sample_review'
     tag "${study_name}"
     publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
-        if (filename.endsWith('.sex_update.txt')) {
+        if (filename.endsWith('.sex_update.txt') || filename.endsWith('.pheno_update.txt')) {
             return "${study_name}/stage3/report/manifests/${filename}"
         }
         if (params.publish_intermediate_plink.toString().toBoolean() && (filename.endsWith('.pgen') || filename.endsWith('.pvar') || filename.endsWith('.psam'))) {
-            return "${study_name}/stage3/sample_review/${filename}"
+            return "${study_name}/stage3/merge_qc/${filename}"
         }
         null
     }
 
     input:
-    tuple val(study_name), val(chroms), path(pgens), path(pvars), path(psams), path(variant_stats), path(id_maps), path(stage1_fam)
+    tuple val(study_name), val(chroms), path(pgens), path(pvars), path(psams), path(stage1_fam)
 
     output:
-    tuple val(study_name), val(chroms), path("${study_name}_allchr.pgen"), path("${study_name}_allchr.pvar"), path("${study_name}_allchr.psam"), path("${study_name}.sex_update.txt"), emit: merged
+    tuple val(study_name), path("${study_name}_allchr.pgen"), path("${study_name}_allchr.pvar"), path("${study_name}_allchr.psam"), path("${study_name}.sex_update.txt"), path("${study_name}.pheno_update.txt"), emit: merged
 
     script:
     def pgen_list = pgens.collect { it.toString() }.join(' ')
     def pvar_list = pvars.collect { it.toString() }.join(' ')
     def psam_list = psams.collect { it.toString() }.join(' ')
     def threads = task.cpus
-    def backoff_secs = (task.attempt - 1) * 30
+    def backoff_secs = (task.attempt - 1) * 120
     """
     [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
 
@@ -40,9 +40,40 @@ process MERGE_STUDY {
       --threads ${threads} \\
       --make-pgen \\
       --sort-vars \\
-      --out ${study_name}_allchr
+      --out "${study_name}_allchr"
 
-    awk '{print \$1, \$2, \$5}' "${stage1_fam}" > ${study_name}.sex_update.txt
+    awk '
+      NR==FNR {
+        sex_by_iid[\$2] = \$5
+        sex_by_fid_iid[\$1 "_" \$2] = \$5
+        next
+      }
+      /^#/ { next }
+      {
+        iid = \$2
+        if (iid in sex_by_iid)          s = sex_by_iid[iid]
+        else if (iid in sex_by_fid_iid) s = sex_by_fid_iid[iid]
+        else                             s = 0
+        print \$1, \$2, s
+      }
+    ' "${stage1_fam}" ${study_name}_allchr.psam > ${study_name}.sex_update.txt
+
+    awk '
+      BEGIN { print "#FID\tIID\tPHENO1" }
+      NR==FNR {
+        pheno_by_iid[\$2] = \$6
+        pheno_by_fid_iid[\$1 "_" \$2] = \$6
+        next
+      }
+      /^#/ { next }
+      {
+        iid = \$2
+        if (iid in pheno_by_iid)          p = pheno_by_iid[iid]
+        else if (iid in pheno_by_fid_iid) p = pheno_by_fid_iid[iid]
+        else                               p = -9
+        print \$1, \$2, p
+      }
+    ' "${stage1_fam}" ${study_name}_allchr.psam >> ${study_name}.pheno_update.txt
     """
 }
 
@@ -170,7 +201,7 @@ process SAMPLE_REVIEW_SUMMARY {
         if (filename.endsWith('.samples_to_remove.id')) {
             return "${study_name}/stage3/report/manifests/${filename}"
         }
-        if (filename.endsWith('.id')) {
+        if (filename.endsWith('.id') || filename.endsWith('.exclude')) {
             return "${study_name}/stage3/report/flags/${filename}"
         }
         null
@@ -179,12 +210,13 @@ process SAMPLE_REVIEW_SUMMARY {
     input:
     tuple val(study_name), path(related_ids), path(het), path(eigenvec), path(eigenval), path(merged_psam)
     val exclude_ancestry_outliers
+    val exclude_related
 
     output:
     tuple val(study_name), path("${study_name}.samples_to_remove.id"), path("${study_name}.sample_review.tsv"), emit: summary
+    tuple val(study_name), path("${study_name}.related.exclude"), emit: related_exclude
+    tuple val(study_name), path("${study_name}.ancestry.exclude"), emit: ancestry_exclude
     path("${study_name}.heterozygosity_outliers.id"), emit: heterozygosity_outliers
-    path("${study_name}.ancestry_outliers.id"), emit: ancestry_outliers
-    path("${study_name}.related_outliers.id"), emit: related_outliers
 
     script:
     def backoff_secs = (task.attempt - 1) * 30
@@ -200,33 +232,40 @@ process SAMPLE_REVIEW_SUMMARY {
       --het-sd-threshold ${params.het_sd_threshold}
 
     if [ -f ${related_ids} ]; then
-      cp ${related_ids} ${study_name}.related_outliers.id
+      cp ${related_ids} ${study_name}.related.exclude
     else
-      : > ${study_name}.related_outliers.id
+      : > ${study_name}.related.exclude
     fi
 
     : > ${study_name}.samples_to_remove.id
     cat ${study_name}.heterozygosity_outliers.id >> ${study_name}.samples_to_remove.id
-    cat ${study_name}.related_outliers.id >> ${study_name}.samples_to_remove.id
+
+    RELATED_REMOVED_COUNT=0
+    if [ "${exclude_related}" = "true" ]; then
+      cat ${study_name}.related.exclude >> ${study_name}.samples_to_remove.id
+      RELATED_REMOVED_COUNT=\$(wc -l < ${study_name}.related.exclude | tr -d ' ')
+    fi
+
+    cp ${study_name}.ancestry_outliers.id ${study_name}.ancestry.exclude
 
     ANCESTRY_REMOVED_COUNT=0
     if [ "${exclude_ancestry_outliers}" = "true" ]; then
-      cat ${study_name}.ancestry_outliers.id >> ${study_name}.samples_to_remove.id
-      ANCESTRY_REMOVED_COUNT=\$(wc -l < ${study_name}.ancestry_outliers.id | tr -d ' ')
+      cat ${study_name}.ancestry.exclude >> ${study_name}.samples_to_remove.id
+      ANCESTRY_REMOVED_COUNT=\$(wc -l < ${study_name}.ancestry.exclude | tr -d ' ')
     fi
 
     sort -u ${study_name}.samples_to_remove.id -o ${study_name}.samples_to_remove.id
 
     PRE_FINAL_SAMPLES=\$(awk 'NR > 1 {count++} END {print count + 0}' ${merged_psam})
-    RELATED_COUNT=\$(wc -l < ${study_name}.related_outliers.id | tr -d ' ')
+    RELATED_IDENTIFIED_COUNT=\$(wc -l < ${study_name}.related.exclude | tr -d ' ')
     HET_COUNT=\$(wc -l < ${study_name}.heterozygosity_outliers.id | tr -d ' ')
-    ANCESTRY_IDENTIFIED_COUNT=\$(wc -l < ${study_name}.ancestry_outliers.id | tr -d ' ')
+    ANCESTRY_IDENTIFIED_COUNT=\$(wc -l < ${study_name}.ancestry.exclude | tr -d ' ')
     TOTAL_REMOVED_COUNT=\$(wc -l < ${study_name}.samples_to_remove.id | tr -d ' ')
 
     {
-      printf "study\\tpre_final_samples\\trelated_removed\\theterozygosity_outliers\\tancestry_outliers_identified\\tancestry_outliers_removed\\ttotal_removed\\n"
-      printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" \\
-        "${study_name}" "\${PRE_FINAL_SAMPLES}" "\${RELATED_COUNT}" "\${HET_COUNT}" "\${ANCESTRY_IDENTIFIED_COUNT}" "\${ANCESTRY_REMOVED_COUNT}" "\${TOTAL_REMOVED_COUNT}"
+      printf "study\\tpre_final_samples\\trelated_identified\\trelated_removed\\theterozygosity_outliers\\tancestry_outliers_identified\\tancestry_outliers_removed\\ttotal_removed\\n"
+      printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" \\
+        "${study_name}" "\${PRE_FINAL_SAMPLES}" "\${RELATED_IDENTIFIED_COUNT}" "\${RELATED_REMOVED_COUNT}" "\${HET_COUNT}" "\${ANCESTRY_IDENTIFIED_COUNT}" "\${ANCESTRY_REMOVED_COUNT}" "\${TOTAL_REMOVED_COUNT}"
     } > ${study_name}.sample_review.tsv
     """
 }

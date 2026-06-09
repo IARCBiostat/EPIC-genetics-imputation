@@ -1,11 +1,4 @@
 #!/usr/bin/env Rscript
-#SBATCH --job-name=003_data_epic
-#SBATCH --output=src/logs/003_data_epic.out
-#SBATCH --error=src/logs/003_data_epic.err
-#SBATCH --time=04:00:00
-#SBATCH --mem=16G
-#SBATCH --cpus-per-task=1
-#SBATCH --partition=low_p
 
 options(stringsAsFactors = FALSE)
 
@@ -14,13 +7,17 @@ usage <- function() {
     "Usage: Rscript src/003_data-epic.R [options]\n",
     "\n",
     "Build a tab-delimited EPIC study phenotype file from:\n",
-    "  genetics_caco.sas7bdat, genetics_id.sas7bdat, genetics.sas7bdat\n",
+    "  genetics_caco.sas7bdat, genetics_id.sas7bdat, genetics.sas7bdat,\n",
+    "  and optionally Subj_Id_2015.txt for supplementary IDs.\n",
     "\n",
     "Options:\n",
-    "  --input-dir DIR            Directory containing the three SAS files.\n",
+    "  --input-dir DIR            Directory containing the SAS files.\n",
     "  --output FILE              Output txt path.\n",
     "  --id-column NAME           ID column to use; default: Idepic_Bio.\n",
     "  --missing-phenotype VALUE  PLINK missing phenotype code; default: -9.\n",
+    "  --subj-id-file FILE        Path to Subj_Id_2015.txt for supplementary IDs\n",
+    "                             not in genetics_id.sas7bdat. Defaults to\n",
+    "                             $SUBJ_ID_FILE or <input-dir>/Subj_Id_2015.txt.\n",
     "  --help                     Show this help.\n",
     "\n",
     sep = ""
@@ -31,9 +28,16 @@ script_path <- function() {
   args <- commandArgs(FALSE)
   file_arg <- grep("^--file=", args, value = TRUE)
   if (length(file_arg) > 0) {
-    return(normalizePath(sub("^--file=", "", file_arg[[1]]), mustWork = FALSE))
+    path <- sub("^--file=", "", file_arg[[1]])
+    if (!startsWith(path, "/")) {
+      submit_dir <- Sys.getenv("SLURM_SUBMIT_DIR", "")
+      if (nchar(submit_dir) > 0) path <- file.path(submit_dir, path)
+    }
+    return(normalizePath(path, mustWork = FALSE))
   }
-  normalizePath("src/003_data-epic.R", mustWork = FALSE)
+  submit_dir <- Sys.getenv("SLURM_SUBMIT_DIR", "")
+  base <- if (nchar(submit_dir) > 0) submit_dir else "."
+  normalizePath(file.path(base, "src/003_data-epic.R"), mustWork = FALSE)
 }
 
 parse_args <- function(args, defaults) {
@@ -72,6 +76,8 @@ parse_args <- function(args, defaults) {
       if (is.na(opts$missing_phenotype)) {
         stop("--missing-phenotype must be an integer.", call. = FALSE)
       }
+    } else if (key == "--subj-id-file") {
+      opts$subj_id_file <- value
     } else {
       stop("Unknown option: ", key, call. = FALSE)
     }
@@ -220,11 +226,51 @@ plink_case_status <- function(in_study, case_control, missing_phenotype) {
   case_control <- as_clean_numeric(case_control)
 
   out <- rep.int(missing_phenotype, length(in_study))
-  included <- !is.na(in_study) & in_study == 1
+  # A sample is included if flagged in genetics_id (GW_* = 1) OR if it has a
+  # caco record — the latter handles supplementary IDs from Subj_Id_2015 that
+  # are not in genetics_id but do appear in genetics_caco for this study.
+  included <- (!is.na(in_study) & in_study == 1) | !is.na(case_control)
 
   out[included & !is.na(case_control) & case_control == 0] <- 1L
   out[included & !is.na(case_control) & case_control == 1] <- 2L
   as.integer(out)
+}
+
+read_subj_id_file <- function(path, id_column) {
+  # Subj_Id_2015.txt: no header, comma-separated.
+  # Columns (1-indexed): Country(1), Center(2), ID_short(3), Sex(4), DOB(5),
+  #   ID_long(6), [spare](7-8), Idepic(9), Idepic_Bio(10)
+  # Only Idepic_Bio is supported as id_column here.
+  if (id_column != "Idepic_Bio") {
+    warning("read_subj_id_file: id_column '", id_column,
+            "' is not Idepic_Bio; supplementary IDs will not be loaded.",
+            call. = FALSE)
+    return(NULL)
+  }
+  lines <- readLines(path, encoding = "latin1", warn = FALSE)
+  lines <- lines[nchar(trimws(lines)) > 0]
+  result <- lapply(lines, function(line) {
+    parts <- strsplit(line, ",", fixed = TRUE)[[1]]
+    if (length(parts) < 10) return(NULL)
+    bio     <- trimws(parts[10])
+    country <- trimws(parts[1])
+    centre  <- trimws(parts[2])
+    sex_raw <- trimws(parts[4])
+    if (is.na(bio) || bio == "") return(NULL)
+    sex <- if (sex_raw %in% c("1", "2")) as.integer(sex_raw) else NA_integer_
+    list(ID = bio, Country = country, Center = centre, Sex = sex)
+  })
+  result <- result[!vapply(result, is.null, logical(1))]
+  if (length(result) == 0) return(NULL)
+  df <- data.frame(
+    ID      = vapply(result, `[[`, character(1), "ID"),
+    Country = vapply(result, `[[`, character(1), "Country"),
+    Center  = vapply(result, `[[`, character(1), "Center"),
+    Sex     = vapply(result, `[[`, integer(1),   "Sex"),
+    stringsAsFactors = FALSE
+  )
+  # Keep first occurrence of each Idepic_Bio
+  df[!duplicated(df$ID), , drop = FALSE]
 }
 
 study_case_control <- function(caco_raw, ids, included, study_id_col, caco_col, id_column) {
@@ -264,7 +310,7 @@ study_case_control <- function(caco_raw, ids, included, study_id_col, caco_col, 
   out
 }
 
-study_map <- data.frame(
+study_map <- base::data.frame(
   study = c(
     "Brea_01_Erneg",
     "Brea_02_Onco",
@@ -284,8 +330,7 @@ study_map <- data.frame(
     "Panc_01_PS1",
     "Panc_02_PS3",
     "Pros_01_Bpc3",
-
-    "Pros_03_Onco",
+    "Pros_03_Onco",  
     "Pros_04_P160555",
     "Ovar_01",
     "Stom_01",
@@ -310,8 +355,7 @@ study_map <- data.frame(
     "GW_PANC_01",
     "GW_PANC_02",
     "GW_PROS_01",
-    "GW_PROS_02",
-    "GW_PROS_03",
+    "GW_PROS_03",  
     "GW_PROS_04",
     "GW_OVAR_01",
     "GW_STOM_01",
@@ -336,8 +380,7 @@ study_map <- data.frame(
     "Cncr_Caco_Panc_Orig",
     "Cncr_Caco_Panc_Orig",
     "Cncr_Caco_Pros_Orig",
-    "Cncr_Caco_Pros_Orig",
-    "Cncr_Caco_Pros_Orig",
+    "Cncr_Caco_Pros_Orig", 
     "Cncr_Caco_Pros_Orig",
     "Cncr_Caco_Ovar_Orig",
     "Cncr_Caco_Stom_Orig",
@@ -349,7 +392,7 @@ study_map <- data.frame(
 main <- function() {
   require_namespace("haven")
 
-  root <- normalizePath(file.path(dirname(script_path()), ".."), mustWork = FALSE)
+  root <- normalizePath(file.path(dirname(script_path()), "..", ".."), mustWork = FALSE)
   default_input_dir <- file.path(root, "data", "reference", "Epic")
   defaults <- list(
     input_dir = Sys.getenv("EPIC_REF_DIR", default_input_dir),
@@ -358,7 +401,11 @@ main <- function() {
       file.path(default_input_dir, "EPIC_study_case_status.txt")
     ),
     id_column = Sys.getenv("EPIC_CASE_STATUS_ID_COLUMN", "Idepic_Bio"),
-    missing_phenotype = as.integer(Sys.getenv("EPIC_MISSING_PHENOTYPE", "-9"))
+    missing_phenotype = as.integer(Sys.getenv("EPIC_MISSING_PHENOTYPE", "-9")),
+    subj_id_file = Sys.getenv(
+      "SUBJ_ID_FILE",
+      file.path(default_input_dir, "Subj_Id_2015.txt")
+    )
   )
   opts <- parse_args(commandArgs(trailingOnly = TRUE), defaults)
   if (is.na(opts$missing_phenotype)) {
@@ -378,11 +425,14 @@ main <- function() {
     }
   }
 
+  subj_id_file <- normalizePath(opts$subj_id_file, mustWork = FALSE)
+
   message("==========================================")
   message(" Building EPIC Study Case Status File")
-  message(" Input dir: ", input_dir)
-  message(" Output:    ", output)
-  message(" ID column: ", opts$id_column)
+  message(" Input dir:     ", input_dir)
+  message(" Output:        ", output)
+  message(" ID column:     ", opts$id_column)
+  message(" Subj_Id file:  ", subj_id_file)
   message("==========================================")
 
   caco_raw <- read_sas_df(caco_file)
@@ -412,9 +462,46 @@ main <- function() {
     single_numeric_cols = "Sex"
   )
 
-  sex_match <- match(id_agg$ID, sex_agg$ID)
+  # ── Supplementary IDs from Subj_Id_2015.txt ────────────────────────────────
+  subj_df <- NULL
+  if (file.exists(subj_id_file)) {
+    message("Reading supplementary IDs from: ", subj_id_file)
+    subj_df <- read_subj_id_file(subj_id_file, opts$id_column)
+    if (!is.null(subj_df)) {
+      new_ids <- subj_df$ID[!subj_df$ID %in% id_agg$ID]
+      message("  IDs in Subj_Id_2015:          ", nrow(subj_df))
+      message("  Already in genetics_id:        ", nrow(subj_df) - length(new_ids))
+      message("  Supplementary IDs to add:      ", length(new_ids))
+      if (length(new_ids) > 0) {
+        subj_new <- subj_df[subj_df$ID %in% new_ids, , drop = FALSE]
+        # Build supplement rows aligned with id_agg columns
+        supp_agg <- data.frame(
+          ID      = subj_new$ID,
+          Country = subj_new$Country,
+          Center  = subj_new$Center,
+          Idepic  = NA_character_,
+          stringsAsFactors = FALSE
+        )
+        for (gw_col in study_map$id_col) {
+          supp_agg[[gw_col]] <- NA_integer_
+        }
+        id_agg <- rbind(id_agg, supp_agg)
+      }
+    }
+  } else {
+    message("Subj_Id_2015 file not found (", subj_id_file, "); skipping supplementary IDs.")
+  }
 
+  # ── Sex: genetics.sas7bdat primary, Subj_Id_2015 fallback ─────────────────
+  sex_match <- match(id_agg$ID, sex_agg$ID)
   sex <- sex_agg$Sex[sex_match]
+
+  if (!is.null(subj_df)) {
+    subj_sex_lookup <- stats::setNames(subj_df$Sex, subj_df$ID)
+    fallback_mask <- (is.na(sex) | !(sex %in% c(1L, 2L))) & id_agg$ID %in% names(subj_sex_lookup)
+    sex[fallback_mask] <- subj_sex_lookup[id_agg$ID[fallback_mask]]
+  }
+
   sex[is.na(sex) | !(sex %in% c(1L, 2L))] <- 0L
 
   out <- data.frame(

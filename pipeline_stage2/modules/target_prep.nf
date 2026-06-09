@@ -69,7 +69,8 @@ EOF
 
     \$BCFTOOLS_BIN annotate --rename-chrs chr_name_conv.txt tmp_${study_name}_chr${chr}.vcf.gz -Ou | \\
         \$BCFTOOLS_BIN annotate -x ID -I +'%CHROM:%POS:%REF:%ALT' -Ou | \\
-        \$BCFTOOLS_BIN norm -m -any -Oz -o target/${study_name}_chr${chr}.vcf.gz
+        \$BCFTOOLS_BIN norm -m -any -Ou | \\
+        \$BCFTOOLS_BIN +fill-tags -Oz -o target/${study_name}_chr${chr}.vcf.gz -- -t AC,AN
 
     \$BCFTOOLS_BIN index -f -t target/${study_name}_chr${chr}.vcf.gz
 

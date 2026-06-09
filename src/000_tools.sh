@@ -12,7 +12,7 @@ trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
 start_time=$(date +%s)
 
 # ── Environment ────────────────────────────────────────────────────────────────
-ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
@@ -23,11 +23,14 @@ IMG_DIR="${TOOLS_DIR}/singularity_images"
 BIN_DIR="${TOOLS_DIR}/bin"
 SRC_DIR="${TOOLS_DIR}/src"
 RPATH_FLAGS="-Wl,-rpath,${TOOLS_DIR}/lib -Wl,-rpath,${TOOLS_DIR}/lib64"
+RENV_NAME="renv"
+RENV_PATH="${HOME}/miniconda3/envs/${RENV_NAME}"
+CONDA_BIN="${HOME}/miniconda3/bin"
 
 mkdir -p "$TOOLS_DIR" "$IMG_DIR" "$BIN_DIR" "$SRC_DIR" logs
 
 export PATH="${BIN_DIR}:${PATH}"
-export APPTAINER_BINDPATH="/data:/data"
+export APPTAINER_BINDPATH
 
 echo "=========================================="
 echo " Setting up Genomic Tools Infrastructure"
@@ -43,7 +46,7 @@ echo "[1/4] Compiling core utilities from source..."
 HTSLIB_URL="https://github.com/samtools/htslib/releases/download/1.23.1/htslib-1.23.1.tar.bz2"
 SAMTOOLS_URL="https://github.com/samtools/samtools/releases/download/1.23.1/samtools-1.23.1.tar.bz2"
 BCFTOOLS_URL="https://github.com/samtools/bcftools/releases/download/1.23.1/bcftools-1.23.1.tar.bz2"
-MINIMAC4_URL="https://github.com/statgen/Minimac4/releases/latest/download/Minimac4-4.1.6-Linux-static.tgz"
+MINIMAC4_URL="https://github.com/statgen/Minimac4/releases/download/v4.1.6/minimac4-4.1.6-Linux-x86_64.sh"
 
 # 1a. HTSLIB
 if [ ! -f "${BIN_DIR}/tabix" ]; then
@@ -93,24 +96,16 @@ fi
 # 1d. Minimac4 static binary
 if [ ! -x "${BIN_DIR}/minimac4.native" ]; then
     echo "  Installing Minimac4 static binary..."
-    cd "${SRC_DIR}"
-    rm -rf minimac4-static
-    mkdir -p minimac4-static
-    curl -sL "$MINIMAC4_URL" -o minimac4-static.tgz
-    tar -xzf minimac4-static.tgz -C minimac4-static
-    MINIMAC4_NATIVE_PATH="$(find minimac4-static -type f -name minimac4 | head -n 1 || true)"
-    if [ -z "${MINIMAC4_NATIVE_PATH}" ]; then
-        echo "  ✗ Could not locate minimac4 in extracted archive" >&2
-        exit 1
-    fi
-    cp "${MINIMAC4_NATIVE_PATH}" "${BIN_DIR}/minimac4.native"
+    curl -fsSL "$MINIMAC4_URL" -o "${BIN_DIR}/minimac4.native"
     chmod +x "${BIN_DIR}/minimac4.native"
     echo "  ✓ minimac4 static binary"
 else
     echo "  ✓ minimac4 static binary (already installed)"
 fi
 
-cd "${PROJ_ROOT}"
+# 1e. PLINK2 via bioconda (installed into renv conda env; avoids container/SIF issues)
+# Remove any previously downloaded invalid .sif file
+rm -f "${IMG_DIR}/plink2.sif"
 
 # ── 2. Container Images ───────────────────────────────────────────────────────
 echo ""
@@ -161,6 +156,12 @@ cat > "${BIN_DIR}/plink" << EOF
 apptainer exec "${IMG_DIR}/plink.sif" plink "\$@"
 EOF
 
+# plink2
+cat > "${BIN_DIR}/plink2" << EOF
+#!/bin/bash
+exec "${RENV_PATH}/bin/plink2" "\$@"
+EOF
+
 # eagle
 cat > "${BIN_DIR}/eagle" << EOF
 #!/bin/bash
@@ -176,7 +177,7 @@ EOF
 # shapeit5
 cat > "${BIN_DIR}/shapeit5" << EOF
 #!/bin/bash
-apptainer exec "${IMG_DIR}/shapeit5.sif" phase_common "\$@"
+apptainer exec "${IMG_DIR}/shapeit5.sif" SHAPEIT5_phase_common "\$@"
 EOF
 
 # picard
@@ -191,7 +192,7 @@ cat > "${BIN_DIR}/liftOver" << EOF
 apptainer exec "${IMG_DIR}/liftover.sif" liftOver "\$@"
 EOF
 
-chmod +x "${BIN_DIR}/plink" "${BIN_DIR}/eagle" "${BIN_DIR}/minimac4" "${BIN_DIR}/shapeit5" "${BIN_DIR}/picard" "${BIN_DIR}/liftOver"
+chmod +x "${BIN_DIR}/plink" "${BIN_DIR}/plink2" "${BIN_DIR}/eagle" "${BIN_DIR}/minimac4" "${BIN_DIR}/shapeit5" "${BIN_DIR}/picard" "${BIN_DIR}/liftOver"
 
 # manual tools logic... (ANNOVAR, conform-gt)
 
@@ -239,24 +240,61 @@ fi
 
 # ── 4. R Packages ─────────────────────────────────────────────────────────────
 echo ""
-echo "[4/5] Installing R packages to ${R_LIBS}..."
-mkdir -p "${R_LIBS}"
+echo "[4/5] Installing R packages..."
+FAILURES=0
 
-R_PKGS=(haven)
-for pkg in "${R_PKGS[@]}"; do
-    if ! Rscript -e "if (!requireNamespace('${pkg}', quietly=TRUE)) stop('missing')" 2>/dev/null; then
-        echo "  Installing R package: ${pkg}"
-        Rscript -e "install.packages('${pkg}', lib='${R_LIBS}', repos='https://cloud.r-project.org', quiet=TRUE)"
-        echo "  ✓ ${pkg}"
+# miniconda's R Makeconf hardcodes /opt/rh/devtoolset-8 (CentOS compiler, absent on Ubuntu).
+# install.packages() compilation always fails. Fix: dedicated conda env with pre-built
+# conda-forge R packages — no compilation involved at all.
+
+if [ ! -d "${RENV_PATH}" ]; then
+    echo "  Creating conda R environment (r-base + r-haven + r-tidyverse + plink2)..."
+    "${CONDA_BIN}/conda" create -y -n "${RENV_NAME}" -c conda-forge -c bioconda \
+        r-base r-haven r-tidyverse plink2
+    if [ ! -x "${RENV_PATH}/bin/Rscript" ]; then
+        echo "  ✗ FAILED: conda renv creation failed"
+        FAILURES=$((FAILURES + 1))
     else
-        echo "  ✓ ${pkg} (already installed)"
+        echo "  ✓ conda renv (r-base + r-haven + r-tidyverse + plink2)"
     fi
-done
+else
+    if "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
+        echo "  ✓ conda renv (already set up, haven available)"
+    else
+        echo "  Adding r-haven to existing renv..."
+        "${CONDA_BIN}/conda" install -y -n "${RENV_NAME}" -c conda-forge r-haven r-tidyverse
+        if ! "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
+            echo "  ✗ FAILED: r-haven not available in renv after install"
+            FAILURES=$((FAILURES + 1))
+        else
+            echo "  ✓ r-haven added to renv"
+        fi
+    fi
+    # Add plink2 to existing renv if not already present
+    if [ ! -x "${RENV_PATH}/bin/plink2" ]; then
+        echo "  Adding plink2 to renv..."
+        "${CONDA_BIN}/conda" install -y -n "${RENV_NAME}" -c conda-forge -c bioconda plink2
+        if [ ! -x "${RENV_PATH}/bin/plink2" ]; then
+            echo "  ✗ FAILED: plink2 not available in renv after install"
+            FAILURES=$((FAILURES + 1))
+        else
+            echo "  ✓ plink2 added to renv"
+        fi
+    else
+        echo "  ✓ plink2 (already in renv)"
+    fi
+fi
+
+# Wrapper so scripts using Rscript from BIN_DIR pick up the renv automatically
+cat > "${BIN_DIR}/Rscript" << EOF
+#!/bin/bash
+exec "${RENV_PATH}/bin/Rscript" "\$@"
+EOF
+chmod +x "${BIN_DIR}/Rscript"
 
 # ── 5. Verification ────────────────────────────────────────────────────────────
 echo ""
 echo "[5/5] Verifying tools in ${BIN_DIR}..."
-FAILURES=0
 
 # List of tools to check specifically in bin/
 CHECK_TOOLS=(
@@ -265,6 +303,7 @@ CHECK_TOOLS=(
     "bgzip"
     "tabix"
     "plink"
+    "plink2"
     "eagle"
     "shapeit5"
     "picard"
@@ -272,6 +311,7 @@ CHECK_TOOLS=(
     "table_annovar.pl"
     "conform-gt"
     "liftOver"
+    "Rscript"
 )
 
 for tool in "${CHECK_TOOLS[@]}"; do

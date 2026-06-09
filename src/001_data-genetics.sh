@@ -12,7 +12,7 @@ trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
 start_time=$(date +%s)
 
 # ── Environment ────────────────────────────────────────────────────────────────
-ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
@@ -20,9 +20,9 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-SOURCE_ROOT="/data/Epic/subprojects/Genetics/sources/Gwas"
-DEST_ROOT="data/genetics"
-EPIC_REF_DEST_ROOT="data/reference/Epic"
+SOURCE_ROOT="${GENETICS_DATA_SOURCE_ROOT}"
+DEST_ROOT="${DATA_ROOT}/genetics"
+EPIC_REF_DEST_ROOT="${REF_DIR}/Epic"
 
 echo "=========================================="
 echo " Synchronizing Genetics Data"
@@ -73,7 +73,6 @@ STUDIES=(
     "Ovar_01|Ovary/Ovar_01|Data_Received_2022|Chip_files|||Ovary/Ovar_01/Data_Received_2021/Link_Ids_Ovar_01Onco.csv|Data_Received_2021/Link_Ids_Ovar_01Onco.csv"
     "Stom_01|Stomach/Stom_01"
     "Uadt_01|Uadt/Uadt_01"
-    "Corpus_Uteri|Corpus_Uteri/GSA2022_922_025_V3/|.|."
 )
 
 # ── Sync Loop ──────────────────────────────────────────────────────────────────
@@ -92,7 +91,7 @@ for entry in "${STUDIES[@]}"; do
     if [ "$DATA_FLD" != "." ]; then
         rsync -avP "${SOURCE_ROOT}/${SUB_PATH}/${DATA_FLD}/" "${TGT_DIR}/${DATA_FLD}/"
     else
-        # Flat structure (e.g. Corpus Uteri)
+        # Flat structure (DATA_FLD=.)
         rsync -avP "${SOURCE_ROOT}/${SUB_PATH}/" "${TGT_DIR}/"
     fi
 

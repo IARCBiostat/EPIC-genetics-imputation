@@ -53,8 +53,8 @@ Options:
                          Minimum matched samples for empirical R2 (default: 20)
   --dose0-min-samples <n>
                          Minimum observed genotype-0 samples for Dose0 (default: 5)
-  --genetic-map-file <file>
-                         Eagle genetic map file (default: <ref_1000g_dir>/genetic_map_hg38_withX.txt.gz)
+  --shapeit5-map-dir <dir>
+                         SHAPEIT5 per-chromosome map directory (default: <ref_dir>/shapeit5/maps)
   --no-resume            Disable Nextflow -resume
   -h, --help             Show this help
 
@@ -65,7 +65,7 @@ Examples:
 EOF
 }
 
-ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
@@ -101,14 +101,14 @@ start_time=$(date +%s)
 PROFILE="${IMPUTATION_PROFILE:-slurm}"
 STUDY="${IMPUTATION_STUDY:-all}"
 CHROMOSOMES="${IMPUTATION_CHROMOSOMES:-all}"
-OUTDIR="${IMPUTATION_OUTDIR:-${PROJ_ROOT}/analysis}"
-STAGE1_ROOT="${IMPUTATION_STAGE1_ROOT:-${PROJ_ROOT}/analysis}"
+OUTDIR="${IMPUTATION_OUTDIR:-${SCRATCH_RUN}/studies}"
+STAGE1_ROOT="${IMPUTATION_STAGE1_ROOT:-${SCRATCH_RUN}/studies}"
 SLURM_PARTITION="${IMPUTATION_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
 REF_1000G_DIR="${IMPUTATION_REF_1000G_DIR:-${PROJ_ROOT}/data/reference/1000G}"
 FASTA_REF="${IMPUTATION_FASTA_REF:-${REF_1000G_DIR}/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
-GENETIC_MAP_FILE="${IMPUTATION_GENETIC_MAP_FILE:-${PROJ_ROOT}/data/reference/eagle/genetic_map_hg38_withX.txt.gz}"
-WORKDIR="${IMPUTATION_WORKDIR:-${PROJ_ROOT}/pipeline_stage2/work}"
-CONDA_CACHE_DIR="${IMPUTATION_CONDA_CACHE_DIR:-${PROJ_ROOT}/pipeline_stage2/conda}"
+SHAPEIT5_MAP_DIR="${STAGE2_SHAPEIT5_MAP_DIR:-${PROJ_ROOT}/data/reference/shapeit5/maps}"
+WORKDIR="${IMPUTATION_WORKDIR:-${SCRATCH_RUN}/stage2/work}"
+CONDA_CACHE_DIR="${IMPUTATION_CONDA_CACHE_DIR:-${SCRATCH_RUN}/stage2/conda}"
 CONDA_SOLVER="${IMPUTATION_CONDA_SOLVER:-classic}"
 CONDA_CHANNEL_PRIORITY="${IMPUTATION_CONDA_CHANNEL_PRIORITY:-strict}"
 CACHE_MODE="${IMPUTATION_CACHE_MODE:-deep}"
@@ -179,8 +179,8 @@ while [[ $# -gt 0 ]]; do
       FASTA_REF="$2"
       shift 2
       ;;
-    --genetic-map-file)
-      GENETIC_MAP_FILE="$2"
+    --shapeit5-map-dir)
+      SHAPEIT5_MAP_DIR="$2"
       shift 2
       ;;
     --no-resume)
@@ -204,7 +204,7 @@ OUTDIR="$(abs_path "${OUTDIR}")"
 STAGE1_ROOT="$(abs_path "${STAGE1_ROOT}")"
 REF_1000G_DIR="$(abs_path "${REF_1000G_DIR}")"
 FASTA_REF="$(abs_path "${FASTA_REF}")"
-GENETIC_MAP_FILE="$(abs_path "${GENETIC_MAP_FILE}")"
+SHAPEIT5_MAP_DIR="$(abs_path "${SHAPEIT5_MAP_DIR}")"
 WORKDIR="$(abs_path "${WORKDIR}")"
 CONDA_CACHE_DIR="$(abs_path "${CONDA_CACHE_DIR}")"
 
@@ -212,11 +212,46 @@ export NXF_OPTS="${NXF_OPTS:- -Xms4g -Xmx24g}"
 export NXF_CONDA_CACHEDIR="${NXF_CONDA_CACHEDIR:-${CONDA_CACHE_DIR}}"
 export CONDA_SOLVER
 export CONDA_CHANNEL_PRIORITY
-export PLINK_BIN="${PLINK_BIN:-plink}"
+# Prefer the full path to the plink Singularity wrapper in GENETICS_TOOLS_BIN so
+# tasks can find it without GENETICS_TOOLS_BIN on their PATH (which would shadow
+# fast conda-installed bcftools/minimac4 with slower wrapper scripts).
+if [ "${PLINK_BIN:-plink}" = "plink" ] && [ -x "${GENETICS_TOOLS_BIN:-}/plink" ]; then
+    PLINK_BIN="${GENETICS_TOOLS_BIN}/plink"
+else
+    PLINK_BIN="${PLINK_BIN:-plink}"
+fi
+export PLINK_BIN
 export BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
-export EAGLE_BIN="${EAGLE_BIN:-eagle}"
+export SHAPEIT5_COMMON_BIN="${SHAPEIT5_COMMON_BIN:-SHAPEIT5_phase_common}"
+# Resolve tool binaries to full paths from the Nextflow conda cache so SLURM
+# workers don't need conda activation to find them.
+_shapeit5_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "SHAPEIT5_phase_common" -type f 2>/dev/null | head -1) || true
+if [ -n "${_shapeit5_bin}" ] && [ -x "${_shapeit5_bin}" ]; then
+    export SHAPEIT5_COMMON_BIN="${_shapeit5_bin}"
+fi
+unset _shapeit5_bin
+
+_bcftools_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "bcftools" \( -type f -o -type l \) 2>/dev/null | head -1) || true
+if [ -n "${_bcftools_bin}" ] && [ -x "${_bcftools_bin}" ]; then
+    export BCFTOOLS_BIN="${_bcftools_bin}"
+fi
+unset _bcftools_bin
 export MINIMAC4_BIN="${MINIMAC4_BIN:-minimac4}"
+_minimac4_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "minimac4" \( -type f -o -type l \) 2>/dev/null | head -1) || true
+if [ -n "${_minimac4_bin}" ] && [ -x "${_minimac4_bin}" ]; then
+    export MINIMAC4_BIN="${_minimac4_bin}"
+fi
+unset _minimac4_bin
 export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
+# Resolve to a Python 3.10+ that has pandas+matplotlib (needed by REPORTING).
+_python3_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 4 -name "python3" 2>/dev/null | while IFS= read -r _p; do
+    [ -x "${_p}" ] || continue
+    "${_p}" -c "import pandas, matplotlib, sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null && printf '%s\n' "${_p}" && break
+done) || true
+if [ -n "${_python3_bin}" ] && [ -x "${_python3_bin}" ]; then
+    export PYTHON3_BIN="${_python3_bin}"
+fi
+unset _python3_bin
 
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
 conda activate nf_EPIC-genetics || true
@@ -256,8 +291,8 @@ if [ ! -f "${FASTA_REF}" ]; then
   exit 1
 fi
 
-if [ ! -f "${GENETIC_MAP_FILE}" ]; then
-  echo "ERROR: Eagle genetic map file not found: ${GENETIC_MAP_FILE}" >&2
+if [ ! -d "${SHAPEIT5_MAP_DIR}" ] || [ -z "$(ls "${SHAPEIT5_MAP_DIR}"/chr*.b38.gmap.gz 2>/dev/null)" ]; then
+  echo "ERROR: SHAPEIT5 map directory not found or empty: ${SHAPEIT5_MAP_DIR}" >&2
   exit 1
 fi
 
@@ -307,9 +342,9 @@ fi
 mkdir -p "${OUTDIR}"
 mkdir -p "${WORKDIR}"
 mkdir -p "${CONDA_CACHE_DIR}"
-cd "${PIPELINE_DIR}"
+cd "${SCRATCH_RUN}/stage2"
 
-NF_CMD=(nextflow run main.nf -profile "${PROFILE}" -work-dir "${WORKDIR}" -params-file "${PARAMS_FILE}" --outdir "${OUTDIR}" --study "${STUDY}" --chromosomes "${CHROMOSOMES}" --stage1_root "${STAGE1_ROOT}" --slurm_partition "${SLURM_PARTITION}" --executor_queue_size "${EXECUTOR_QUEUE_SIZE}" --ref_1000g_dir "${REF_1000G_DIR}" --fasta_ref "${FASTA_REF}" --genetic_map_file "${GENETIC_MAP_FILE}" --cache_mode "${CACHE_MODE}" --summary_min_r2 "${SUMMARY_MIN_R2}" --summary_high_quality "${SUMMARY_HIGH_QUALITY}" --run_empirical_validation "${RUN_EMPIRICAL_VALIDATION}" --empirical_min_samples "${EMPIRICAL_MIN_SAMPLES}" --dose0_min_samples "${DOSE0_MIN_SAMPLES}")
+NF_CMD=(nextflow run "${PIPELINE_DIR}/main.nf" -profile "${PROFILE}" -work-dir "${WORKDIR}" -params-file "${PARAMS_FILE}" --outdir "${OUTDIR}" --pipeline_info_dir "${SCRATCH_RUN}/stage2/pipeline_info" --study "${STUDY}" --chromosomes "${CHROMOSOMES}" --stage1_root "${STAGE1_ROOT}" --slurm_partition "${SLURM_PARTITION}" --executor_queue_size "${EXECUTOR_QUEUE_SIZE}" --ref_1000g_dir "${REF_1000G_DIR}" --fasta_ref "${FASTA_REF}" --shapeit5_map_dir "${SHAPEIT5_MAP_DIR}" --cache_mode "${CACHE_MODE}" --summary_min_r2 "${SUMMARY_MIN_R2}" --summary_high_quality "${SUMMARY_HIGH_QUALITY}" --run_empirical_validation "${RUN_EMPIRICAL_VALIDATION}" --empirical_min_samples "${EMPIRICAL_MIN_SAMPLES}" --dose0_min_samples "${DOSE0_MIN_SAMPLES}")
 if [ "${RESUME}" = "1" ]; then
   NF_CMD+=(-resume)
 fi
@@ -334,11 +369,12 @@ echo "Queue size:   ${EXECUTOR_QUEUE_SIZE}"
 echo "Stage1 input: ${STAGE1_ROOT}/<STUDY>/stage1/<STUDY>"
 echo "Ref 1000G:    ${REF_1000G_DIR}"
 echo "FASTA:        ${FASTA_REF}"
-echo "Genetic map:  ${GENETIC_MAP_FILE}"
+echo "SHAPEIT5 maps:${SHAPEIT5_MAP_DIR}"
 echo "PLINK bin:    ${PLINK_BIN}"
 echo "BCFtools bin: ${BCFTOOLS_BIN}"
-echo "Eagle bin:    ${EAGLE_BIN}"
+echo "SHAPEIT5 bin: ${SHAPEIT5_COMMON_BIN}"
 echo "Minimac4 bin: ${MINIMAC4_BIN}"
+echo "Python3 bin:  ${PYTHON3_BIN}"
 echo "Study:        ${STUDY}"
 echo "Chromosomes:  ${CHROMOSOMES}"
 echo "Summary R2:   ${SUMMARY_MIN_R2}"
@@ -359,6 +395,20 @@ printf '\n'
 
 "${NF_CMD[@]}"
 
+echo ""
+echo "Building stage-2 summary..."
+"${PYTHON3_BIN}" "${PIPELINE_DIR}/bin/summary.py" \
+  --analysis-root "${OUTDIR}" \
+  --stage1-root "${STAGE1_ROOT}" \
+  --output "${OUTDIR}/stage2-summary.md" \
+  --studies "${STUDY}" \
+  --chromosomes "${CHROMOSOMES}" \
+  --min-r2-threshold "${SUMMARY_MIN_R2}" \
+  --high-quality-threshold "${SUMMARY_HIGH_QUALITY}"
+
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))
-echo "Total runtime: $(date -u -r "$elapsed" +%H:%M:%S 2>/dev/null || date -u -d "@$elapsed" +%H:%M:%S)"
+echo ""
+echo "Stage-2 pipeline complete."
+echo "Elapsed: ${elapsed} seconds"
+echo "Summary: ${OUTDIR}/stage2-summary.md"

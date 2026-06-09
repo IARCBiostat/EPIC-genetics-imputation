@@ -199,6 +199,8 @@ FIGURE_EXPLANATIONS = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create per-study cross-stage master reports.")
     parser.add_argument("--analysis-root", default=str(REPO_ROOT / "analysis"))
+    parser.add_argument("--report-dir", default=None,
+                        help="Directory for master-report output (default: <analysis-root>/report)")
     parser.add_argument("--studies", default="all")
     return parser.parse_args()
 
@@ -256,9 +258,11 @@ def clean_existing_copies(destination_dir: Path, study: str) -> None:
             path.unlink()
 
 
-def copy_stage_reports(analysis_root: Path, studies: list[str]) -> dict[tuple[str, str], list[Path]]:
+def copy_stage_reports(analysis_root: Path, studies: list[str], report_root: Path | None = None) -> dict[tuple[str, str], list[Path]]:
     copied: dict[tuple[str, str], list[Path]] = {}
-    report_root = ensure_dir(analysis_root / "report")
+    if report_root is None:
+        report_root = analysis_root / "report"
+    report_root = ensure_dir(report_root)
     for path in report_root.rglob(".DS_Store"):
         path.unlink(missing_ok=True)
 
@@ -989,8 +993,10 @@ def render_stage_section(
 """
 
 
-def write_master_report(analysis_root: Path, copied: dict[tuple[str, str], list[Path]], study: str) -> Path:
-    report_root = ensure_dir(analysis_root / "report")
+def write_master_report(analysis_root: Path, copied: dict[tuple[str, str], list[Path]], study: str, report_root: Path | None = None) -> Path:
+    if report_root is None:
+        report_root = analysis_root / "report"
+    report_root = ensure_dir(report_root)
     output_path = report_root / f"{study}.master-report.html"
     metrics = overview_metrics(analysis_root, study)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -1069,13 +1075,15 @@ def main() -> None:
     if not analysis_root.is_dir():
         raise SystemExit(f"Analysis root does not exist: {analysis_root}")
 
+    report_root = Path(args.report_dir).resolve() if args.report_dir else None
+
     studies = study_ids(analysis_root, args.studies)
     if not studies:
         raise SystemExit("No studies were found for master report generation.")
 
-    copied = copy_stage_reports(analysis_root, studies)
+    copied = copy_stage_reports(analysis_root, studies, report_root=report_root)
     for study in studies:
-        output_path = write_master_report(analysis_root, copied, study)
+        output_path = write_master_report(analysis_root, copied, study, report_root=report_root)
         print(f"Wrote {output_path}")
 
 

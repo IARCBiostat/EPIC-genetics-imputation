@@ -14,6 +14,15 @@ process REPORTING {
     echo "Reporting trigger for study: ${study_name}"
     echo "Input file count: ${input_count}"
 
+    if ! \$PYTHON3_BIN -c "import matplotlib, pandas" >/dev/null 2>&1; then
+        _py=\$(find "\${NXF_CONDA_CACHE}" -maxdepth 4 -name "python3" 2>/dev/null | while IFS= read -r _p; do
+            [ -x "\${_p}" ] || continue
+            "\${_p}" -c "import matplotlib, pandas" 2>/dev/null && printf '%s\n' "\${_p}" && break
+        done)
+        [ -n "\$_py" ] && PYTHON3_BIN="\$_py"
+        unset _py
+    fi
+
     \$PYTHON3_BIN ${projectDir}/bin/run_stage2_reports.py \\
       --analysis-root "${params.outdir}" \\
       --stage1-root "${params.stage1_root}" \\

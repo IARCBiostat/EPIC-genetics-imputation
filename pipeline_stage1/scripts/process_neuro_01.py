@@ -67,26 +67,48 @@ def main() -> None:
         study_dir,
     )
 
+    # The raw PED/MAP uses compact Idepic format (e.g. 21_21000373) while the
+    # shared EPIC case-status file uses the padded Idepic_Bio format
+    # (e.g. 21____21000373, always 14 chars).  Remap IIDs and FIDs here so that
+    # apply_epic_sample_metadata can match against the case-status file.
+    id_update_path = trace / f'{PREFIX}_id_update.txt'
+    remapped_prefix = trace / f'{PREFIX}_remapped'
+    with open(id_update_path, 'w') as fout:
+        for line in base_prefix.with_suffix('.fam').read_text().splitlines():
+            parts = line.split()
+            fid, iid = parts[0], parts[1]
+            # 21_21000373 → 21____21000373  (replace single _ with ____)
+            def _pad(id_str: str) -> str:
+                if id_str.count('_') == 1:
+                    return id_str.replace('_', '____', 1)
+                return id_str
+            fout.write(f'{fid}\t{iid}\t{_pad(fid)}\t{_pad(iid)}\n')
+    run(
+        plink_cmd(args.plink, f"--bfile {q(base_prefix)} --update-ids {q(id_update_path)} --make-bed --out {q(remapped_prefix)}"),
+        study_dir,
+    )
+    remove_prefix(base_prefix, study_dir)
+
     write_summary(
         summary,
         (
             "\n*************************** Neuro_01 Stage 1 *******************************\n"
             "Using the delivered before-QC PED/MAP dataset as the stage-1 input.\n"
             "Converted the PED/MAP delivery to a PLINK binary dataset before stage-1 processing.\n"
-            "No study-specific chip manifest or EPIC linkage file is available in the current synced layout,\n"
-            "so manifest-driven normalization and EPIC ID remapping are skipped for this study.\n"
+            "Raw PED/MAP IDs use compact Idepic format (e.g. 21_21000373); remapped to padded\n"
+            "Idepic_Bio format (21____21000373) so EPIC case-status metadata can be applied.\n"
             f"Assumed source build: {args.build}\n\n"
         ),
         'w',
     )
 
-    apply_epic_sample_metadata(base_prefix, metadata_prefix, data_root, STUDY_ID, summary, strict=False)
+    apply_epic_sample_metadata(remapped_prefix, metadata_prefix, data_root, STUDY_ID, summary, strict=False)
     run(
         plink_cmd(args.plink, f"--bfile {q(metadata_prefix)} --indiv-sort n --make-bed --out {q(ready_prefix)}"),
         study_dir,
     )
     remove_prefix(metadata_prefix, study_dir)
-    remove_prefix(base_prefix, study_dir)
+    remove_prefix(remapped_prefix, study_dir)
 
     write_summary(
         summary,

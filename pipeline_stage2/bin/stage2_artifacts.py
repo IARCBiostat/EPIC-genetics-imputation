@@ -12,6 +12,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -447,6 +449,30 @@ def _variant_merge_key(row: pd.Series) -> str:
     return allele_key or pos_key
 
 
+def _variant_key_vectors(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Vectorized equivalent of frame.apply(_variant_keys, axis=1).
+
+    Parses variant_id (CHROM:POS:REF:ALT) without row-wise apply to avoid
+    the O(rows * cols) numpy object array that apply materialises internally.
+    Returns (allele_key_series, pos_key_series).
+    """
+    if "variant_id" in frame.columns:
+        vid = frame["variant_id"].astype(str).str.replace("chr", "", regex=False)
+    else:
+        vid = pd.Series([""] * len(frame), index=frame.index)
+    parts = vid.str.split(":", n=3, expand=True).reindex(columns=range(4)).fillna("")
+    chrom = parts[0].map(_normalise_chrom)
+    pos = parts[1]
+    ref_a = parts[2].str.upper()
+    alt_a = parts[3].str.upper()
+    has_alleles = ref_a.ne("") & alt_a.ne("")
+    lo = ref_a.where(ref_a <= alt_a, alt_a)
+    hi = alt_a.where(ref_a <= alt_a, ref_a)
+    allele_key = (chrom + ":" + pos + ":" + lo + ":" + hi).where(has_alleles, "")
+    pos_key = chrom + ":" + pos
+    return allele_key, pos_key
+
+
 def _load_variant_frame(analysis_root: Path, study: str) -> tuple[pd.DataFrame, Path | None]:
     table_path = _load_or_build_r2_table(analysis_root, study)
     if table_path is None:
@@ -463,8 +489,8 @@ def _load_variant_frame(analysis_root: Path, study: str) -> tuple[pd.DataFrame, 
     frame["chrom_clean"] = chrom_values.astype(str).map(_normalise_chrom)
     allele_keys, pos_keys = _stage1_variant_sets(analysis_root, study)
     if allele_keys or pos_keys:
-        keys = frame.apply(_variant_keys, axis=1)
-        frame["is_genotyped"] = [allele_key in allele_keys or pos_key in pos_keys for allele_key, pos_key in keys]
+        _allele_key, _pos_key = _variant_key_vectors(frame)
+        frame["is_genotyped"] = _allele_key.isin(allele_keys) | _pos_key.isin(pos_keys)
     else:
         frame["is_genotyped"] = False
 
@@ -473,7 +499,8 @@ def _load_variant_frame(analysis_root: Path, study: str) -> tuple[pd.DataFrame, 
         validation = pd.read_csv(validation_path, sep="\t")
         if not validation.empty:
             validation["pos_numeric"] = pd.to_numeric(validation["pos"] if "pos" in validation else pd.Series(dtype=float), errors="coerce")
-            validation["validation_key"] = validation.apply(_variant_merge_key, axis=1)
+            _val_allele, _val_pos = _variant_key_vectors(validation)
+            validation["validation_key"] = _val_allele.where(_val_allele.ne(""), _val_pos)
             validation_columns = [
                 "validation_key",
                 "empirical_dosage_r2",
@@ -490,7 +517,8 @@ def _load_variant_frame(analysis_root: Path, study: str) -> tuple[pd.DataFrame, 
                 if column != "validation_key":
                     validation[column] = pd.to_numeric(validation[column], errors="coerce")
 
-            frame["validation_key"] = frame.apply(_variant_merge_key, axis=1)
+            _frame_allele, _frame_pos = _variant_key_vectors(frame)
+            frame["validation_key"] = _frame_allele.where(_frame_allele.ne(""), _frame_pos)
             
             # Drop existing validation columns from frame to avoid name collisions (_x, _y)
             cols_to_drop = [c for c in available_columns if c in frame and c != "validation_key"]
@@ -883,7 +911,7 @@ def run_variant_summary(analysis_root: Path, study: str, reference_dir: Path, fo
         "median_r2": float(scored["r2"].median()) if not scored.empty else float("nan"),
         "p5_r2": float(scored["r2"].quantile(0.05)) if not scored.empty else float("nan"),
     }
-    row.update({label: int(value) for label, value in zip(R2_BIN_LABELS, counts, strict=True)})
+    row.update({label: int(value) for label, value in zip(R2_BIN_LABELS, counts)})
     formatted_row = {k: format_numeric(v) if k in ("mean_r2", "median_r2", "p5_r2") else v for k, v in row.items()}
     write_tsv([formatted_row], summary_path)
 
@@ -1213,59 +1241,103 @@ def _reference_af_cache(analysis_root: Path, reference_dir: Path, chroms: list[s
     return caches
 
 
+def _af_pair_key_series(source: pd.DataFrame) -> pd.Series:
+    """Build CHROM:POS:ALLELE_LO:ALLELE_HI pair keys from an imputation metrics frame."""
+    vid = source["variant_id"].astype(str).str.replace("chr", "", regex=False)
+    parts = vid.str.split(":", n=3, expand=True).reindex(columns=range(4)).fillna("")
+    chrom = parts[0].where(parts[0].ne(""), source["chrom"].astype(str).str.replace("chr", "", regex=False))
+    pos = parts[1].where(parts[1].ne(""), source["pos"].astype(str))
+    ref_a = parts[2].str.upper()
+    alt_a = parts[3].str.upper()
+    has_alleles = ref_a.ne("") & alt_a.ne("")
+    lo = ref_a.where(ref_a <= alt_a, alt_a)
+    hi = alt_a.where(ref_a <= alt_a, ref_a)
+    return (chrom + ":" + pos + ":" + lo + ":" + hi).where(has_alleles, chrom + ":" + pos)
+
+
+def _ref_lookup_for_chrom(cache_path: Path) -> pd.DataFrame | None:
+    """Load a single-chromosome 1KG AF cache and return a (pair_key, kg_af) DataFrame."""
+    ref = pd.read_csv(cache_path, sep="\t", compression="gzip", dtype=str)
+    required = ["chrom", "pos", "ref", "alt", "af"]
+    if any(col not in ref.columns for col in required):
+        return None
+    ref = ref.dropna(subset=required).copy()
+    ref["pos_numeric"] = pd.to_numeric(ref["pos"], errors="coerce")
+    ref["kg_af"] = ref["af"].astype(str).str.split(",").str[0].map(safe_float)
+    ref = ref.dropna(subset=["pos_numeric", "kg_af"])
+    chrom_clean = ref["chrom"].astype(str).str.replace("chr", "", regex=False)
+    ref_up = ref["ref"].astype(str).str.upper()
+    alt_up = ref["alt"].astype(str).str.upper()
+    keep = chrom_clean.ne("") & ref_up.ne("") & alt_up.ne("")
+    ref = ref.loc[keep].copy()
+    chrom_clean = chrom_clean.loc[keep]
+    ref_up = ref_up.loc[keep]
+    alt_up = alt_up.loc[keep]
+    lo = ref_up.where(ref_up <= alt_up, alt_up)
+    hi = alt_up.where(ref_up <= alt_up, ref_up)
+    pair_key = chrom_clean + ":" + ref["pos_numeric"].astype(int).astype(str) + ":" + lo + ":" + hi
+    kg_af_raw = ref["kg_af"].astype(float)
+    kg_af = kg_af_raw.where(kg_af_raw <= 0.5, 1.0 - kg_af_raw)
+    return pd.DataFrame({"pair_key": pair_key.values, "kg_af": kg_af.values})
+
+
 def run_af_concordance(analysis_root: Path, study: str, reference_dir: Path, force: bool) -> None:
     del force
     logger, _ = setup_logger(REPO_ROOT, PIPELINE_NAME, "af_concordance")
     check_dependencies(logger, commands=[], python_packages=STAGE2_PY_PACKAGES)
     dirs = _report_dirs(analysis_root, study)
-    table_path = _load_or_build_r2_table(analysis_root, study)
     flags = _note_flags(study, "af_concordance")
     assets: list[dict[str, object]] = []
-    if table_path is None:
+
+    # Collect per-chromosome imputation tables (avoids loading all chromosomes at once).
+    chrom_tables = _stage2_imputation_variant_tables(analysis_root, study)
+    if not chrom_tables:
         _write_manifest(dirs, "af_concordance", assets)
         _write_flags(dirs, "af_concordance", flags)
         return
 
-    source = pd.read_csv(table_path, sep="\t").dropna(subset=["maf"])
-    rows = []
-    chroms = set()
-    for chrom, pos, variant_id, maf in source[["chrom", "pos", "variant_id", "maf"]].itertuples(index=False, name=None):
-        parts = str(variant_id).split(":")
-        if len(parts) >= 4:
-            chrom_key = parts[0].replace("chr", "")
-            allele_key = ":".join(sorted([parts[-2].upper(), parts[-1].upper()]))
-            pair_key = f"{chrom_key}:{parts[1]}:{allele_key}"
-        else:
-            chrom_key = str(chrom).replace("chr", "")
-            pair_key = f"{chrom_key}:{pos}"
-        chroms.add(chrom_key)
-        rows.append({"variant_id": variant_id, "pair_key": pair_key, "imputed_af": safe_float(maf)})
-    frame = pd.DataFrame(rows).dropna(subset=["imputed_af"])
-    cache_paths = _reference_af_cache(analysis_root, reference_dir, sorted(chroms), logger)
-    reference_rows = read_reference_af_rows(cache_paths)
-    ref = pd.DataFrame(reference_rows)
-    if ref.empty:
+    # Ensure all per-chromosome reference AF caches exist before streaming.
+    all_chroms = [c for path in chrom_tables if (c := _chrom_from_path(path)) is not None]
+    cache_paths = _reference_af_cache(analysis_root, reference_dir, sorted(set(all_chroms)), logger)
+
+    # Process one chromosome at a time to keep peak memory bounded.
+    matched_chunks: list[pd.DataFrame] = []
+    for chrom_table in chrom_tables:
+        chrom = _chrom_from_path(chrom_table)
+        if chrom is None or not chrom_table.stat().st_size:
+            continue
+
+        source = pd.read_csv(chrom_table, sep="\t", usecols=lambda c: c in {"chrom", "pos", "variant_id", "maf"}).dropna(subset=["maf"])
+        if source.empty:
+            continue
+
+        frame = pd.DataFrame({
+            "variant_id": source["variant_id"],
+            "pair_key": _af_pair_key_series(source),
+            "imputed_af": source["maf"].map(safe_float),
+        }).dropna(subset=["imputed_af"])
+        del source
+
+        if chrom not in cache_paths:
+            continue
+        ref_lookup = _ref_lookup_for_chrom(cache_paths[chrom])
+        if ref_lookup is None or ref_lookup.empty:
+            continue
+
+        chunk = frame.merge(ref_lookup, on="pair_key", how="inner")
+        del frame, ref_lookup
+        if not chunk.empty:
+            matched_chunks.append(chunk)
+
+    if not matched_chunks:
         flags.append(flag_row(study=study, task="af_concordance", metric="reference_af", value="missing", threshold="present", flag_level="WARN", message="No 1KG reference AF rows were available."))
         _write_manifest(dirs, "af_concordance", assets)
         _write_flags(dirs, "af_concordance", flags)
         return
 
-    required_ref_columns = ["chrom", "pos", "ref", "alt", "af"]
-    missing_ref_columns = [column for column in required_ref_columns if column not in ref.columns]
-    if missing_ref_columns:
-        flags.append(flag_row(study=study, task="af_concordance", metric="reference_af_columns", value=",".join(missing_ref_columns), threshold="chrom,pos,ref,alt,af", flag_level="WARN", message="Reference AF cache was missing required columns."))
-        _write_manifest(dirs, "af_concordance", assets)
-        _write_flags(dirs, "af_concordance", flags)
-        return
-    ref = ref.dropna(subset=[column for column in required_ref_columns if column in ref.columns]).copy()
-    ref["pos_numeric"] = pd.to_numeric(ref["pos"], errors="coerce")
-    ref["kg_af"] = ref["af"].astype(str).str.split(",").str[0].map(safe_float)
-    ref = ref.dropna(subset=["pos_numeric", "kg_af"]).copy()
-    ref["chrom_clean"] = ref["chrom"].astype(str).str.replace("chr", "", regex=False)
-    ref = ref.loc[ref["chrom_clean"].ne("") & ref["ref"].astype(str).ne("") & ref["alt"].astype(str).ne("")].copy()
-    ref["pair_key"] = ref.apply(lambda row: f"{row['chrom_clean']}:{int(row['pos_numeric'])}:{':'.join(sorted([str(row['ref']).upper(), str(row['alt']).upper()]))}", axis=1)
-    ref["kg_af"] = ref["kg_af"].astype(float).map(lambda value: min(value, 1.0 - value))
-    matched = frame.merge(ref[["pair_key", "kg_af"]], on="pair_key", how="inner")
+    matched = pd.concat(matched_chunks, ignore_index=True)
+    del matched_chunks
+
     if matched.empty:
         flags.append(flag_row(study=study, task="af_concordance", metric="matched_variants", value=0, threshold=">0", flag_level="WARN", message="No variants matched the 1KG reference AF cache."))
         _write_manifest(dirs, "af_concordance", assets)
@@ -1374,7 +1446,7 @@ def _table_section(title: str, caption: str, path: Path, max_rows: int = 25) -> 
     return "\n".join(parts)
 
 
-def _metric_cards(dirs: dict[str, Path]) -> str:
+def _metric_cards(dirs: dict[str, Path], study: str) -> str:
     cards: list[tuple[str, str]] = []
     r2_summary = dirs["tables"] / "r2_summary.tsv"
     if r2_summary.exists():
@@ -1443,7 +1515,7 @@ def write_html_report(analysis_root: Path, study: str) -> Path:
     if summary_path.exists():
         parts.append(f"<p class=\"note\">Authoritative cross-study summary: <code>{html.escape(_project_relative(summary_path))}</code></p>")
 
-    metric_cards = _metric_cards(dirs)
+    metric_cards = _metric_cards(dirs, study)
     if metric_cards:
         parts.append(metric_cards)
 

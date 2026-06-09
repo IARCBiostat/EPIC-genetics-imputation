@@ -70,6 +70,9 @@ print_help() {
   cat <<'EOF'
 Usage: sbatch src/006_stage3.sh [options]
 
+QC thresholds default to values in pipeline_stage3/params.yaml.
+Pass a flag only to override the params.yaml value for that run.
+
 Options:
   --profile <name>                  Nextflow profile to use (default: slurm)
   --study <list>                    Comma-separated study IDs to process (default: all)
@@ -80,32 +83,29 @@ Options:
   --dbsnp-tbi <file>                dbSNP GRCh38 VCF index
   --partition <name>                Slurm partition for internal Nextflow task submissions
   --prep-dbsnp-time <duration>            Wall time for PREP_DBSNP_CHROM jobs (default: 72h)
-  --filter-chrom-time <duration>          Wall time for FILTER_CHROM jobs (default: 72h)
-  --annotate-chrom-time <duration>        Wall time for ANNOTATE_CHROM jobs (default: 72h)
+  --prepare-chrom-time <duration>         Wall time for PREPARE_CHROM jobs (default: 72h)
   --import-chrom-time <duration>          Wall time for IMPORT_CHROM jobs (default: 72h)
   --hwe-chrom-time <duration>             Wall time for HWE_CHROM jobs (default: 72h)
-  --merge-study-time <duration>           Wall time for MERGE_STUDY jobs (default: 72h)
-  --sex-check-time <duration>             Wall time for SEX_CHECK jobs (default: 72h)
+  --merge-study-time <duration>           Wall time for MERGE_FOR_QC jobs (default: 72h)
   --prune-autosomes-time <duration>       Wall time for PRUNE_AUTOSOMES jobs (default: 72h)
   --king-qc-time <duration>               Wall time for KING_QC jobs (default: 72h)
   --het-pca-qc-time <duration>            Wall time for HET_PCA_QC jobs (default: 72h)
   --sample-review-summary-time <duration> Wall time for SAMPLE_REVIEW_SUMMARY jobs (default: 72h)
-  --finalize-study-time <duration>        Wall time for FINALIZE_STUDY jobs (default: 72h)
+  --finalize-chrom-time <duration>        Wall time for FINALIZE_CHROM jobs (default: 72h)
   --publish-intermediate-plink      Copy intermediate PLINK/PGEN/BED files into analysis output
   --no-publish-intermediate-plink   Do not copy intermediate PLINK/PGEN/BED files (default)
-  --min-r2 <value>                  Minimum imputation R2 (default: 0.3)
-  --maf <value>                     Minimum MAF (default: 0.01)
-  --hwe-p <value>                   HWE p-value threshold (default: 0.000005)
-  --run-hwe                         Re-enable stage-3 HWE filtering (disabled by default; stage-1 handoff owns HWE)
-  --no-hwe                          Disable HWE filtering
-  --exclude-ancestry-outliers       Exclude ancestry outliers from the final dataset
-  --no-exclude-ancestry-outliers    Keep ancestry outliers in the final dataset
+  --min-r2 <value>                  Minimum imputation R2 (overrides params.yaml)
+  --maf <value>                     Minimum MAF (overrides params.yaml)
+  --hwe true|false                  Apply HWE filtering on controls only (overrides params.yaml; default: true)
+  --hwe-p <value>                   HWE p-value threshold (overrides params.yaml)
+  --related true|false              Exclude related samples from the final dataset (overrides params.yaml; default: false)
+  --ancestry true|false             Exclude ancestry outliers from the final dataset (overrides params.yaml; default: false)
   --no-resume                       Disable Nextflow -resume
   -h, --help                        Show this help
 EOF
 }
 
-ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
@@ -138,41 +138,39 @@ fi
 
 start_time=$(date +%s)
 
+# --- Infrastructure settings (environment-specific; shell defaults are appropriate) ---
 PROFILE="${STAGE3_PROFILE:-slurm}"
 STUDY="${STAGE3_STUDY:-all}"
-OUTDIR="${STAGE3_OUTDIR:-${PROJ_ROOT}/analysis}"
-STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${PROJ_ROOT}/analysis}"
-STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${PROJ_ROOT}/analysis}"
+OUTDIR="${STAGE3_OUTDIR:-${SCRATCH_RUN}/studies}"
+STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${SCRATCH_RUN}/studies}"
+STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${SCRATCH_RUN}/studies}"
 SLURM_PARTITION="${STAGE3_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
 PREP_DBSNP_TIME="${STAGE3_PREP_DBSNP_TIME:-72h}"
-FILTER_CHROM_TIME="${STAGE3_FILTER_CHROM_TIME:-72h}"
-ANNOTATE_CHROM_TIME="${STAGE3_ANNOTATE_CHROM_TIME:-72h}"
+PREPARE_CHROM_TIME="${STAGE3_PREPARE_CHROM_TIME:-72h}"
 IMPORT_CHROM_TIME="${STAGE3_IMPORT_CHROM_TIME:-72h}"
 HWE_CHROM_TIME="${STAGE3_HWE_CHROM_TIME:-72h}"
 MERGE_STUDY_TIME="${STAGE3_MERGE_STUDY_TIME:-72h}"
-SEX_CHECK_TIME="${STAGE3_SEX_CHECK_TIME:-72h}"
 PRUNE_AUTOSOMES_TIME="${STAGE3_PRUNE_AUTOSOMES_TIME:-72h}"
 KING_QC_TIME="${STAGE3_KING_QC_TIME:-72h}"
 HET_PCA_QC_TIME="${STAGE3_HET_PCA_QC_TIME:-72h}"
 SAMPLE_REVIEW_SUMMARY_TIME="${STAGE3_SAMPLE_REVIEW_SUMMARY_TIME:-72h}"
-FINALIZE_STUDY_TIME="${STAGE3_FINALIZE_STUDY_TIME:-72h}"
+FINALIZE_CHROM_TIME="${STAGE3_FINALIZE_CHROM_TIME:-72h}"
 PUBLISH_INTERMEDIATE_PLINK="${STAGE3_PUBLISH_INTERMEDIATE_PLINK:-false}"
-WORKDIR="${STAGE3_WORKDIR:-${PROJ_ROOT}/pipeline_stage3/work}"
-CONDA_CACHE_DIR="${STAGE3_CONDA_CACHE_DIR:-${PROJ_ROOT}/pipeline_stage3/conda}"
+WORKDIR="${STAGE3_WORKDIR:-${SCRATCH_RUN}/stage3/work}"
+CONDA_CACHE_DIR="${STAGE3_CONDA_CACHE_DIR:-${SCRATCH_RUN}/stage3/conda}"
 CONDA_SOLVER="${STAGE3_CONDA_SOLVER:-classic}"
 CONDA_CHANNEL_PRIORITY="${STAGE3_CONDA_CHANNEL_PRIORITY:-strict}"
 CACHE_MODE="${STAGE3_CACHE_MODE:-lenient}"
-MIN_R2="${STAGE3_MIN_R2:-0.3}"
-MAF="${STAGE3_MAF:-0.01}"
-RUN_HWE="${STAGE3_RUN_HWE:-true}"
-HWE_P="${STAGE3_HWE_P:-0.000005}"
-HWE_K="${STAGE3_HWE_K:-0}"
-KING_CUTOFF="${STAGE3_KING_CUTOFF:-0.0884}"
-ANCESTRY_PC_COUNT="${STAGE3_ANCESTRY_PC_COUNT:-10}"
-ANCESTRY_Z_THRESHOLD="${STAGE3_ANCESTRY_Z_THRESHOLD:-6.0}"
-HET_SD_THRESHOLD="${STAGE3_HET_SD_THRESHOLD:-3.0}"
-EXCLUDE_ANCESTRY_OUTLIERS="${STAGE3_EXCLUDE_ANCESTRY_OUTLIERS:-true}"
 RESUME=1
+
+# --- QC parameters: empty means "use params.yaml default"; only set if user passes a flag ---
+HWE=""
+HWE_P=""
+MIN_R2=""
+MAF=""
+RELATED=""
+ANCESTRY=""
+
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -213,12 +211,8 @@ while [[ $# -gt 0 ]]; do
       PREP_DBSNP_TIME="$2"
       shift 2
       ;;
-    --filter-chrom-time)
-      FILTER_CHROM_TIME="$2"
-      shift 2
-      ;;
-    --annotate-chrom-time)
-      ANNOTATE_CHROM_TIME="$2"
+    --prepare-chrom-time)
+      PREPARE_CHROM_TIME="$2"
       shift 2
       ;;
     --import-chrom-time)
@@ -231,10 +225,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --merge-study-time)
       MERGE_STUDY_TIME="$2"
-      shift 2
-      ;;
-    --sex-check-time)
-      SEX_CHECK_TIME="$2"
       shift 2
       ;;
     --prune-autosomes-time)
@@ -253,8 +243,8 @@ while [[ $# -gt 0 ]]; do
       SAMPLE_REVIEW_SUMMARY_TIME="$2"
       shift 2
       ;;
-    --finalize-study-time)
-      FINALIZE_STUDY_TIME="$2"
+    --finalize-chrom-time)
+      FINALIZE_CHROM_TIME="$2"
       shift 2
       ;;
     --publish-intermediate-plink)
@@ -273,25 +263,30 @@ while [[ $# -gt 0 ]]; do
       MAF="$2"
       shift 2
       ;;
+    --hwe)
+      if [[ "$2" != "true" && "$2" != "false" ]]; then
+        echo "ERROR: --hwe must be 'true' or 'false'" >&2; exit 1
+      fi
+      HWE="$2"
+      shift 2
+      ;;
     --hwe-p)
       HWE_P="$2"
       shift 2
       ;;
-    --run-hwe)
-      RUN_HWE="true"
-      shift
+    --related)
+      if [[ "$2" != "true" && "$2" != "false" ]]; then
+        echo "ERROR: --related must be 'true' or 'false'" >&2; exit 1
+      fi
+      RELATED="$2"
+      shift 2
       ;;
-    --no-hwe)
-      RUN_HWE="false"
-      shift
-      ;;
-    --exclude-ancestry-outliers)
-      EXCLUDE_ANCESTRY_OUTLIERS="true"
-      shift
-      ;;
-    --no-exclude-ancestry-outliers)
-      EXCLUDE_ANCESTRY_OUTLIERS="false"
-      shift
+    --ancestry)
+      if [[ "$2" != "true" && "$2" != "false" ]]; then
+        echo "ERROR: --ancestry must be 'true' or 'false'" >&2; exit 1
+      fi
+      ANCESTRY="$2"
+      shift 2
       ;;
     --no-resume)
       RESUME=0
@@ -312,7 +307,7 @@ PIPELINE_DIR="${PROJ_ROOT}/pipeline_stage3"
 PARAMS_FILE="${PIPELINE_DIR}/params.yaml"
 SUMMARY_SCRIPT="${PIPELINE_DIR}/bin/summary.py"
 SUMMARY_OUTPUT="${OUTDIR}/stage3-summary.md"
-NEXTFLOW_LOG="${PIPELINE_DIR}/.nextflow.log"
+NEXTFLOW_LOG="${SCRATCH_RUN}/stage3/.nextflow.log"
 
 OUTDIR="$(abs_path "${OUTDIR}")"
 STAGE1_ROOT="$(abs_path "${STAGE1_ROOT}")"
@@ -334,17 +329,15 @@ export PLINK_BIN="${PLINK_BIN:-plink}"
 export PLINK2_BIN="${PLINK2_BIN:-plink2}"
 export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
 export STAGE3_PREP_DBSNP_TIME="${PREP_DBSNP_TIME}"
-export STAGE3_FILTER_CHROM_TIME="${FILTER_CHROM_TIME}"
-export STAGE3_ANNOTATE_CHROM_TIME="${ANNOTATE_CHROM_TIME}"
+export STAGE3_PREPARE_CHROM_TIME="${PREPARE_CHROM_TIME}"
 export STAGE3_IMPORT_CHROM_TIME="${IMPORT_CHROM_TIME}"
 export STAGE3_HWE_CHROM_TIME="${HWE_CHROM_TIME}"
 export STAGE3_MERGE_STUDY_TIME="${MERGE_STUDY_TIME}"
-export STAGE3_SEX_CHECK_TIME="${SEX_CHECK_TIME}"
 export STAGE3_PRUNE_AUTOSOMES_TIME="${PRUNE_AUTOSOMES_TIME}"
 export STAGE3_KING_QC_TIME="${KING_QC_TIME}"
 export STAGE3_HET_PCA_QC_TIME="${HET_PCA_QC_TIME}"
 export STAGE3_SAMPLE_REVIEW_SUMMARY_TIME="${SAMPLE_REVIEW_SUMMARY_TIME}"
-export STAGE3_FINALIZE_STUDY_TIME="${FINALIZE_STUDY_TIME}"
+export STAGE3_FINALIZE_CHROM_TIME="${FINALIZE_CHROM_TIME}"
 export STAGE3_PUBLISH_INTERMEDIATE_PLINK="${PUBLISH_INTERMEDIATE_PLINK}"
 
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
@@ -412,8 +405,8 @@ if [ "${STUDY}" != "all" ]; then
   done
 fi
 
-mkdir -p "${PROJ_ROOT}/src/logs" "${WORKDIR}" "${CONDA_CACHE_DIR}" "${PIPELINE_DIR}/.nextflow"
-cd "${PIPELINE_DIR}"
+mkdir -p "${PROJ_ROOT}/src/logs" "${WORKDIR}" "${CONDA_CACHE_DIR}" "${SCRATCH_RUN}/stage3"
+cd "${SCRATCH_RUN}/stage3"
 
 echo "=========================================="
 echo " Running EPIC Genetics Stage-3 Pipeline"
@@ -432,34 +425,34 @@ echo "dbSNP TBI:                  ${DBSNP_TBI}"
 echo "Work dir:                   ${WORKDIR}"
 echo "Conda cache:                ${CONDA_CACHE_DIR}"
 echo "PREP_DBSNP_CHROM wall time:      ${PREP_DBSNP_TIME}"
-echo "FILTER_CHROM wall time:          ${FILTER_CHROM_TIME}"
-echo "ANNOTATE_CHROM wall time:        ${ANNOTATE_CHROM_TIME}"
+echo "PREPARE_CHROM wall time:         ${PREPARE_CHROM_TIME}"
 echo "IMPORT_CHROM wall time:          ${IMPORT_CHROM_TIME}"
 echo "HWE_CHROM wall time:             ${HWE_CHROM_TIME}"
-echo "MERGE_STUDY wall time:           ${MERGE_STUDY_TIME}"
-echo "SEX_CHECK wall time:             ${SEX_CHECK_TIME}"
+echo "MERGE_FOR_QC wall time:          ${MERGE_STUDY_TIME}"
 echo "PRUNE_AUTOSOMES wall time:       ${PRUNE_AUTOSOMES_TIME}"
 echo "KING_QC wall time:               ${KING_QC_TIME}"
 echo "HET_PCA_QC wall time:            ${HET_PCA_QC_TIME}"
 echo "SAMPLE_REVIEW_SUMMARY wall time: ${SAMPLE_REVIEW_SUMMARY_TIME}"
-echo "FINALIZE_STUDY wall time:        ${FINALIZE_STUDY_TIME}"
-echo "Publish PLINK intermediates:${STAGE3_PUBLISH_INTERMEDIATE_PLINK}"
-echo "Min R2:                     ${MIN_R2}"
-echo "MAF:                        ${MAF}"
-echo "Run HWE:                    ${RUN_HWE}"
-echo "HWE p-value:                ${HWE_P}"
-echo "Exclude ancestry outliers:  ${EXCLUDE_ANCESTRY_OUTLIERS}"
+echo "FINALIZE_CHROM wall time:        ${FINALIZE_CHROM_TIME}"
+echo "Publish PLINK intermediates: ${PUBLISH_INTERMEDIATE_PLINK}"
+echo "Min R2:                     ${MIN_R2:-from params.yaml}"
+echo "MAF:                        ${MAF:-from params.yaml}"
+echo "HWE:                        ${HWE:-from params.yaml}"
+echo "HWE p-value:                ${HWE_P:-from params.yaml}"
+echo "Exclude related:            ${RELATED:-from params.yaml}"
+echo "Exclude ancestry outliers:  ${ANCESTRY:-from params.yaml}"
 echo "Cache mode:                 ${CACHE_MODE}"
 echo "=========================================="
 
 nextflow_cmd=(
   nextflow
   -log "${NEXTFLOW_LOG}"
-  run .
+  run "${PIPELINE_DIR}"
   -params-file "${PARAMS_FILE}"
   -profile "${PROFILE}"
   -work-dir "${WORKDIR}"
   --outdir "${OUTDIR}"
+  --pipeline_info_dir "${SCRATCH_RUN}/stage3/pipeline_info"
   --stage1_root "${STAGE1_ROOT}"
   --stage2_root "${STAGE2_ROOT}"
   --study "${STUDY}"
@@ -468,29 +461,25 @@ nextflow_cmd=(
   --slurm_partition "${SLURM_PARTITION}"
   --cache_mode "${CACHE_MODE}"
   --prep_dbsnp_time "${PREP_DBSNP_TIME}"
-  --filter_chrom_time "${FILTER_CHROM_TIME}"
-  --annotate_chrom_time "${ANNOTATE_CHROM_TIME}"
+  --prepare_chrom_time "${PREPARE_CHROM_TIME}"
   --import_chrom_time "${IMPORT_CHROM_TIME}"
   --hwe_chrom_time "${HWE_CHROM_TIME}"
   --merge_study_time "${MERGE_STUDY_TIME}"
-  --sex_check_time "${SEX_CHECK_TIME}"
   --prune_autosomes_time "${PRUNE_AUTOSOMES_TIME}"
   --king_qc_time "${KING_QC_TIME}"
   --het_pca_qc_time "${HET_PCA_QC_TIME}"
   --sample_review_summary_time "${SAMPLE_REVIEW_SUMMARY_TIME}"
-  --finalize_study_time "${FINALIZE_STUDY_TIME}"
+  --finalize_chrom_time "${FINALIZE_CHROM_TIME}"
   --publish_intermediate_plink "${PUBLISH_INTERMEDIATE_PLINK}"
-  --min_r2 "${MIN_R2}"
-  --maf "${MAF}"
-  --run_hwe "${RUN_HWE}"
-  --hwe_p "${HWE_P}"
-  --hwe_k "${HWE_K}"
-  --king_cutoff "${KING_CUTOFF}"
-  --ancestry_pc_count "${ANCESTRY_PC_COUNT}"
-  --ancestry_z_threshold "${ANCESTRY_Z_THRESHOLD}"
-  --het_sd_threshold "${HET_SD_THRESHOLD}"
-  --exclude_ancestry_outliers "${EXCLUDE_ANCESTRY_OUTLIERS}"
 )
+
+# QC overrides: only passed if explicitly set by the user; otherwise params.yaml governs.
+[ -n "${MIN_R2}" ]  && nextflow_cmd+=(--min_r2 "${MIN_R2}")
+[ -n "${MAF}" ]     && nextflow_cmd+=(--maf "${MAF}")
+[ -n "${HWE}" ]     && nextflow_cmd+=(--hwe "${HWE}")
+[ -n "${HWE_P}" ]   && nextflow_cmd+=(--hwe_p "${HWE_P}")
+[ -n "${RELATED}" ] && nextflow_cmd+=(--related "${RELATED}")
+[ -n "${ANCESTRY}" ] && nextflow_cmd+=(--ancestry "${ANCESTRY}")
 
 if [ "${RESUME}" = "1" ]; then
   nextflow_cmd+=(-resume)
@@ -500,7 +489,78 @@ if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
   nextflow_cmd+=("${EXTRA_ARGS[@]}")
 fi
 
-"${nextflow_cmd[@]}"
+# Auto-retry on transient NFS IOException.
+# Nextflow has a resource-leak bug where FileChannelImpl is closed by the JVM
+# garbage-collector rather than explicitly; on NFS/Lustre this occasionally
+# returns EINVAL on the deferred close(), which Nextflow treats as a
+# session-level abort (killing all 150+ running tasks).  The fix is to detect
+# that specific abort, remove the empty/partial work dir that triggered it, and
+# resume — all completed tasks are preserved by the lenient cache.
+MAX_NF_ATTEMPTS=8
+NF_ATTEMPT=0
+NF_EXIT=1
+
+# Suspend the ERR trap for the retry loop so that Nextflow failures are handled
+# by the NFS IOException retry logic below rather than causing an immediate exit.
+trap - ERR
+
+while [ "${NF_ATTEMPT}" -lt "${MAX_NF_ATTEMPTS}" ]; do
+    NF_ATTEMPT=$(( NF_ATTEMPT + 1 ))
+    [ "${NF_ATTEMPT}" -gt 1 ] && \
+        echo "Nextflow resume attempt ${NF_ATTEMPT}/${MAX_NF_ATTEMPTS} after NFS IOException..."
+
+    # Record log offset before this attempt so we only scan lines from the current run.
+    LOG_START=$([ -f "${NEXTFLOW_LOG}" ] && wc -l < "${NEXTFLOW_LOG}" || echo 0)
+    LOG_START=$(( LOG_START + 1 ))
+
+    set +e
+    "${nextflow_cmd[@]}"
+    NF_EXIT=$?
+    set -e
+
+    [ "${NF_EXIT}" -eq 0 ] && break
+
+    # Only retry for the NFS IOException; propagate genuine pipeline failures.
+    # Scan only the lines appended during this attempt to avoid false matches from
+    # previous runs whose IOException entries persist in the accumulated log file.
+    if ! tail -n +"${LOG_START}" "${NEXTFLOW_LOG}" 2>/dev/null \
+            | grep -q "java.io.IOException: Invalid argument"; then
+        echo "ERROR: Nextflow failed (exit ${NF_EXIT}) without NFS IOException — not retrying." >&2
+        break
+    fi
+
+    echo "WARNING: Nextflow session aborted by NFS IOException." >&2
+    echo "  Identifying and removing partial work directories..." >&2
+
+    tail -n +"${LOG_START}" "${NEXTFLOW_LOG}" 2>/dev/null | awk '
+        /Handling unexpected condition/ { expect_wdir=1; wdir="" }
+        expect_wdir && /work-dir=/ {
+            n = split($0, a, "work-dir=")
+            split(a[2], b, ";")
+            wdir = b[1]; expect_wdir=0; expect_exc=1
+        }
+        expect_exc && /java\.io\.IOException/ { print wdir; expect_exc=0; wdir="" }
+    ' | sort -u | \
+    while IFS= read -r wdir; do
+        [ -n "${wdir}" ] || continue
+        { rm -rf "${wdir}" && echo "  Removed: ${wdir}" >&2; } 2>/dev/null || true
+    done
+
+    # Ensure -resume is active for all subsequent attempts.
+    if ! printf '%s\0' "${nextflow_cmd[@]}" | grep -qz -- '-resume'; then
+        nextflow_cmd+=(-resume)
+    fi
+
+    sleep 30
+done
+
+# Restore ERR trap for the remaining steps.
+trap 'echo "ERROR: Stage-3 pipeline failed on line $LINENO" >&2; exit 1' ERR
+
+if [ "${NF_EXIT}" -ne 0 ]; then
+    echo "ERROR: Nextflow pipeline failed after ${NF_ATTEMPT} attempt(s) (exit ${NF_EXIT})." >&2
+    exit "${NF_EXIT}"
+fi
 
 echo ""
 echo "Building stage-3 summary..."

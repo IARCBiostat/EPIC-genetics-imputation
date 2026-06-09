@@ -18,6 +18,12 @@ process IMPUTE_CHRX {
     """
     set -euo pipefail
 
+    # Resolve minimac4 to full path if conda activation did not add it to PATH.
+    if ! command -v "\$MINIMAC4_BIN" >/dev/null 2>&1; then
+        _m4=\$(find "\${NXF_CONDA_CACHE}" -maxdepth 4 -name "minimac4" 2>/dev/null | head -1)
+        [ -n "\$_m4" ] && [ -x "\$_m4" ] && MINIMAC4_BIN="\$_m4"
+    fi
+
     prepare_minimac_target() {
         local block="\$1"
         local input="phased.\${block}.vcf.gz"
@@ -51,24 +57,28 @@ process IMPUTE_CHRX {
         if \$SHAPEIT5_COMMON_BIN \\
             --input target.PAR1.vcf.gz \\
             --reference 1kGP_panel_chrX.PAR1.bcf \\
-            --map ${params.shapeit5_map_dir}/chrX.b38.gmap.gz \\
+            --map ${params.shapeit5_map_dir}/chrX_par1.b38.gmap.gz \\
             --region chrX:1-2781513 \\
             --thread ${threads} \\
-            --output phased.PAR1.vcf.gz; then
+            --output phased.PAR1.bcf && \\
+           \$BCFTOOLS_BIN view -Oz -o phased.PAR1.vcf.gz phased.PAR1.bcf; then
             \$BCFTOOLS_BIN index -t phased.PAR1.vcf.gz
+            rm -f phased.PAR1.bcf
 
             if prepare_minimac_target PAR1 && \\
                \$MINIMAC4_BIN 1kGP_panel_chrX.PAR1.msav phased.PAR1.minimac.vcf.gz \\
-                -o imputed.PAR1.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O vcf.gz; then
+                -o imputed.PAR1.bcf --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O bcf; then
+                \$BCFTOOLS_BIN view -Oz -o imputed.PAR1.vcf.gz imputed.PAR1.bcf
+                rm -f imputed.PAR1.bcf
                 \$BCFTOOLS_BIN index -t imputed.PAR1.vcf.gz
                 imputed_blocks+=(imputed.PAR1.vcf.gz)
             else
                 echo "Skipping chrX PAR1: Minimac4 could not impute this block"
-                rm -f imputed.PAR1.vcf.gz imputed.PAR1.vcf.gz.tbi
+                rm -f imputed.PAR1.vcf.gz imputed.PAR1.vcf.gz.tbi imputed.PAR1.bcf
             fi
         else
             echo "Skipping chrX PAR1: SHAPEIT5 failed on this block"
-            rm -f phased.PAR1.vcf.gz phased.PAR1.vcf.gz.tbi
+            rm -f phased.PAR1.bcf phased.PAR1.vcf.gz phased.PAR1.vcf.gz.tbi
         fi
     else
         echo "Skipping chrX PAR1: no overlapping target/reference variants after filtering"
@@ -90,21 +100,25 @@ process IMPUTE_CHRX {
             --map ${params.shapeit5_map_dir}/chrX.b38.gmap.gz \\
             --region chrX:2781514-155700882 \\
             --thread ${threads} \\
-            --output phased.nonPAR.vcf.gz; then
+            --output phased.nonPAR.bcf && \\
+           \$BCFTOOLS_BIN view -Oz -o phased.nonPAR.vcf.gz phased.nonPAR.bcf; then
             \$BCFTOOLS_BIN index -t phased.nonPAR.vcf.gz
+            rm -f phased.nonPAR.bcf
 
             if prepare_minimac_target nonPAR && \\
                \$MINIMAC4_BIN 1kGP_panel_chrX.nonPAR.msav phased.nonPAR.minimac.vcf.gz \\
-                -o imputed.nonPAR.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-ratio ${params.chrx_min_ratio} --min-r2 ${params.min_r2} -O vcf.gz; then
+                -o imputed.nonPAR.bcf --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-ratio ${params.chrx_min_ratio} --min-r2 ${params.min_r2} -O bcf; then
+                \$BCFTOOLS_BIN view -Oz -o imputed.nonPAR.vcf.gz imputed.nonPAR.bcf
+                rm -f imputed.nonPAR.bcf
                 \$BCFTOOLS_BIN index -t imputed.nonPAR.vcf.gz
                 imputed_blocks+=(imputed.nonPAR.vcf.gz)
             else
                 echo "Skipping chrX nonPAR: Minimac4 could not impute this block"
-                rm -f imputed.nonPAR.vcf.gz imputed.nonPAR.vcf.gz.tbi
+                rm -f imputed.nonPAR.vcf.gz imputed.nonPAR.vcf.gz.tbi imputed.nonPAR.bcf
             fi
         else
             echo "Skipping chrX nonPAR: SHAPEIT5 failed on this block"
-            rm -f phased.nonPAR.vcf.gz phased.nonPAR.vcf.gz.tbi
+            rm -f phased.nonPAR.bcf phased.nonPAR.vcf.gz phased.nonPAR.vcf.gz.tbi
         fi
     else
         echo "Skipping chrX nonPAR: no overlapping target/reference variants after filtering"
@@ -123,24 +137,28 @@ process IMPUTE_CHRX {
         if \$SHAPEIT5_COMMON_BIN \\
             --input target.PAR2.vcf.gz \\
             --reference 1kGP_panel_chrX.PAR2.bcf \\
-            --map ${params.shapeit5_map_dir}/chrX.b38.gmap.gz \\
+            --map ${params.shapeit5_map_dir}/chrX_par2.b38.gmap.gz \\
             --region chrX:155700883- \\
             --thread ${threads} \\
-            --output phased.PAR2.vcf.gz; then
+            --output phased.PAR2.bcf && \\
+           \$BCFTOOLS_BIN view -Oz -o phased.PAR2.vcf.gz phased.PAR2.bcf; then
             \$BCFTOOLS_BIN index -t phased.PAR2.vcf.gz
+            rm -f phased.PAR2.bcf
 
             if prepare_minimac_target PAR2 && \\
                \$MINIMAC4_BIN 1kGP_panel_chrX.PAR2.msav phased.PAR2.minimac.vcf.gz \\
-                -o imputed.PAR2.vcf.gz --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O vcf.gz; then
+                -o imputed.PAR2.bcf --threads ${params.minimac_threads} -b ${params.minimac_batch_size} --min-r2 ${params.min_r2} -O bcf; then
+                \$BCFTOOLS_BIN view -Oz -o imputed.PAR2.vcf.gz imputed.PAR2.bcf
+                rm -f imputed.PAR2.bcf
                 \$BCFTOOLS_BIN index -t imputed.PAR2.vcf.gz
                 imputed_blocks+=(imputed.PAR2.vcf.gz)
             else
                 echo "Skipping chrX PAR2: Minimac4 could not impute this block"
-                rm -f imputed.PAR2.vcf.gz imputed.PAR2.vcf.gz.tbi
+                rm -f imputed.PAR2.vcf.gz imputed.PAR2.vcf.gz.tbi imputed.PAR2.bcf
             fi
         else
             echo "Skipping chrX PAR2: SHAPEIT5 failed on this block"
-            rm -f phased.PAR2.vcf.gz phased.PAR2.vcf.gz.tbi
+            rm -f phased.PAR2.bcf phased.PAR2.vcf.gz phased.PAR2.vcf.gz.tbi
         fi
     else
         echo "Skipping chrX PAR2: no overlapping target/reference variants after filtering"

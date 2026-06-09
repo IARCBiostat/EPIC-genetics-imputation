@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # Root-only environment sourcing
-ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
+ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
@@ -23,7 +23,7 @@ TOOLS_DIR="${TOOLS_DIR:-${PROJ_ROOT}/tools}"
 REF_DIR="${REF_DIR:-${PROJ_ROOT}/data/reference}"
 
 mkdir -p "${REF_DIR}/1000G"
-mkdir -p "${REF_DIR}/eagle"
+mkdir -p "${REF_DIR}/shapeit5/maps"
 mkdir -p "${REF_DIR}/dbsnp"
 mkdir -p "${REF_DIR}/annovar_db"
 mkdir -p "${REF_DIR}/Chain_LiftOver"
@@ -61,29 +61,16 @@ if [ ! -f "${REF_DIR}/1000G/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna" ]; 
     curl -sL ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz | gzip -d > "${REF_DIR}/1000G/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 fi
 
-# 1c. Eagle hg38 recombination map with chrX
-# Source: Broad Eagle download tables
-EAGLE_MAP_DEST="${REF_DIR}/eagle/genetic_map_hg38_withX.txt.gz"
-if [ ! -f "${EAGLE_MAP_DEST}" ]; then
-    echo "Downloading Eagle hg38 genetic map with chrX..."
-    EAGLE_MAP_URLS=(
-        "https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz"
-        "http://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz"
-    )
-
-    downloaded=0
-    for url in "${EAGLE_MAP_URLS[@]}"; do
-        if curl -fsSL "${url}" -o "${EAGLE_MAP_DEST}"; then
-            downloaded=1
-            break
-        fi
-    done
-
-    if [ "${downloaded}" -ne 1 ]; then
-        rm -f "${EAGLE_MAP_DEST}"
-        echo "ERROR: Failed to download Eagle genetic map from Broad." >&2
-        exit 1
-    fi
+# 1c. SHAPEIT5 per-chromosome genetic maps (GRCh38)
+# Source: odelaneau/shapeit resources/maps/b38
+SHAPEIT5_MAP_DIR="${REF_DIR}/shapeit5/maps"
+SHAPEIT5_MAP_TAR_URL="https://github.com/odelaneau/shapeit/raw/main/resources/maps/b38/genetic_maps.b38.tar.gz"
+if [ -z "$(ls "${SHAPEIT5_MAP_DIR}"/chr*.b38.gmap.gz 2>/dev/null)" ]; then
+    echo "Downloading SHAPEIT5 GRCh38 genetic maps..."
+    curl -fsSL "${SHAPEIT5_MAP_TAR_URL}" | tar -xz -C "${SHAPEIT5_MAP_DIR}"
+    echo "  ✓ SHAPEIT5 genetic maps"
+else
+    echo "  ✓ SHAPEIT5 genetic maps (already downloaded)"
 fi
 
 # 1d. dbSNP GRCh38 VCF for rsID annotation
