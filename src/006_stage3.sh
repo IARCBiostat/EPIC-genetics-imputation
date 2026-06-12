@@ -86,8 +86,9 @@ Options:
   --prepare-chrom-time <duration>         Wall time for PREPARE_CHROM jobs (default: 72h)
   --import-chrom-time <duration>          Wall time for IMPORT_CHROM jobs (default: 72h)
   --hwe-chrom-time <duration>             Wall time for HWE_CHROM jobs (default: 72h)
-  --merge-study-time <duration>           Wall time for MERGE_FOR_QC jobs (default: 72h)
-  --prune-autosomes-time <duration>       Wall time for PRUNE_AUTOSOMES jobs (default: 72h)
+  --prune-chrom-time <duration>           Wall time for PRUNE_CHROM_FOR_QC jobs (default: 72h)
+  --merge-pruned-time <duration>          Wall time for MERGE_PRUNED_FOR_QC jobs (default: 72h)
+  --make-update-files-time <duration>     Wall time for MAKE_UPDATE_FILES jobs (default: 1h)
   --king-qc-time <duration>               Wall time for KING_QC jobs (default: 72h)
   --het-pca-qc-time <duration>            Wall time for HET_PCA_QC jobs (default: 72h)
   --sample-review-summary-time <duration> Wall time for SAMPLE_REVIEW_SUMMARY jobs (default: 72h)
@@ -144,13 +145,14 @@ STUDY="${STAGE3_STUDY:-all}"
 OUTDIR="${STAGE3_OUTDIR:-${SCRATCH_RUN}/studies}"
 STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${SCRATCH_RUN}/studies}"
 STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${SCRATCH_RUN}/studies}"
-SLURM_PARTITION="${STAGE3_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
+SLURM_PARTITION="${STAGE3_PARTITION:-low_p}"
 PREP_DBSNP_TIME="${STAGE3_PREP_DBSNP_TIME:-72h}"
 PREPARE_CHROM_TIME="${STAGE3_PREPARE_CHROM_TIME:-72h}"
 IMPORT_CHROM_TIME="${STAGE3_IMPORT_CHROM_TIME:-72h}"
 HWE_CHROM_TIME="${STAGE3_HWE_CHROM_TIME:-72h}"
-MERGE_STUDY_TIME="${STAGE3_MERGE_STUDY_TIME:-72h}"
-PRUNE_AUTOSOMES_TIME="${STAGE3_PRUNE_AUTOSOMES_TIME:-72h}"
+PRUNE_CHROM_TIME="${STAGE3_PRUNE_CHROM_TIME:-72h}"
+MERGE_PRUNED_TIME="${STAGE3_MERGE_PRUNED_TIME:-72h}"
+MAKE_UPDATE_FILES_TIME="${STAGE3_MAKE_UPDATE_FILES_TIME:-1h}"
 KING_QC_TIME="${STAGE3_KING_QC_TIME:-72h}"
 HET_PCA_QC_TIME="${STAGE3_HET_PCA_QC_TIME:-72h}"
 SAMPLE_REVIEW_SUMMARY_TIME="${STAGE3_SAMPLE_REVIEW_SUMMARY_TIME:-72h}"
@@ -223,12 +225,16 @@ while [[ $# -gt 0 ]]; do
       HWE_CHROM_TIME="$2"
       shift 2
       ;;
-    --merge-study-time)
-      MERGE_STUDY_TIME="$2"
+    --prune-chrom-time)
+      PRUNE_CHROM_TIME="$2"
       shift 2
       ;;
-    --prune-autosomes-time)
-      PRUNE_AUTOSOMES_TIME="$2"
+    --merge-pruned-time)
+      MERGE_PRUNED_TIME="$2"
+      shift 2
+      ;;
+    --make-update-files-time)
+      MAKE_UPDATE_FILES_TIME="$2"
       shift 2
       ;;
     --king-qc-time)
@@ -332,8 +338,9 @@ export STAGE3_PREP_DBSNP_TIME="${PREP_DBSNP_TIME}"
 export STAGE3_PREPARE_CHROM_TIME="${PREPARE_CHROM_TIME}"
 export STAGE3_IMPORT_CHROM_TIME="${IMPORT_CHROM_TIME}"
 export STAGE3_HWE_CHROM_TIME="${HWE_CHROM_TIME}"
-export STAGE3_MERGE_STUDY_TIME="${MERGE_STUDY_TIME}"
-export STAGE3_PRUNE_AUTOSOMES_TIME="${PRUNE_AUTOSOMES_TIME}"
+export STAGE3_PRUNE_CHROM_TIME="${PRUNE_CHROM_TIME}"
+export STAGE3_MERGE_PRUNED_TIME="${MERGE_PRUNED_TIME}"
+export STAGE3_MAKE_UPDATE_FILES_TIME="${MAKE_UPDATE_FILES_TIME}"
 export STAGE3_KING_QC_TIME="${KING_QC_TIME}"
 export STAGE3_HET_PCA_QC_TIME="${HET_PCA_QC_TIME}"
 export STAGE3_SAMPLE_REVIEW_SUMMARY_TIME="${SAMPLE_REVIEW_SUMMARY_TIME}"
@@ -428,8 +435,9 @@ echo "PREP_DBSNP_CHROM wall time:      ${PREP_DBSNP_TIME}"
 echo "PREPARE_CHROM wall time:         ${PREPARE_CHROM_TIME}"
 echo "IMPORT_CHROM wall time:          ${IMPORT_CHROM_TIME}"
 echo "HWE_CHROM wall time:             ${HWE_CHROM_TIME}"
-echo "MERGE_FOR_QC wall time:          ${MERGE_STUDY_TIME}"
-echo "PRUNE_AUTOSOMES wall time:       ${PRUNE_AUTOSOMES_TIME}"
+echo "PRUNE_CHROM_FOR_QC wall time:    ${PRUNE_CHROM_TIME}"
+echo "MERGE_PRUNED_FOR_QC wall time:   ${MERGE_PRUNED_TIME}"
+echo "MAKE_UPDATE_FILES wall time:     ${MAKE_UPDATE_FILES_TIME}"
 echo "KING_QC wall time:               ${KING_QC_TIME}"
 echo "HET_PCA_QC wall time:            ${HET_PCA_QC_TIME}"
 echo "SAMPLE_REVIEW_SUMMARY wall time: ${SAMPLE_REVIEW_SUMMARY_TIME}"
@@ -464,8 +472,9 @@ nextflow_cmd=(
   --prepare_chrom_time "${PREPARE_CHROM_TIME}"
   --import_chrom_time "${IMPORT_CHROM_TIME}"
   --hwe_chrom_time "${HWE_CHROM_TIME}"
-  --merge_study_time "${MERGE_STUDY_TIME}"
-  --prune_autosomes_time "${PRUNE_AUTOSOMES_TIME}"
+  --prune_chrom_time "${PRUNE_CHROM_TIME}"
+  --merge_pruned_time "${MERGE_PRUNED_TIME}"
+  --make_update_files_time "${MAKE_UPDATE_FILES_TIME}"
   --king_qc_time "${KING_QC_TIME}"
   --het_pca_qc_time "${HET_PCA_QC_TIME}"
   --sample_review_summary_time "${SAMPLE_REVIEW_SUMMARY_TIME}"

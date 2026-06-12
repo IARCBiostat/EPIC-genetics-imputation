@@ -1,16 +1,18 @@
 # EPIC Genetics Pipeline
 
-This repository contains the EPIC genetics imputation pipeline. The pipeline is composed of 3-stages, each stage uses an independent Nextflow workflow:
+This repository contains the EPIC genetics imputation pipeline. The pipeline is composed of 4 stages, each stage uses an independent Nextflow workflow:
 
 1. `pipeline_stage1/`: study-specific raw [genotype](https://en.wikipedia.org/wiki/Genotype) preprocessing and liftover to hg38
 2. `pipeline_stage2/`: [phasing](https://en.wikipedia.org/wiki/Haplotype_estimation) and [imputation](https://en.wikipedia.org/wiki/Imputation_(genetics)) against the [1000 Genomes Project](https://en.wikipedia.org/wiki/1000_Genomes_Project) high-coverage GRCh38 reference
 3. `pipeline_stage3/`: post-imputation QC, [rsID](https://www.ncbi.nlm.nih.gov/snp/docs/RefSNP_about/) annotation, and conversion to PLINK2 format
+4. `pipeline_stage4/`: cross-stage master report generation and final study archive
 
-Stage-specific documentation lives in:
+Stage-specific documentation:
 
 - [pipeline_stage1/README.md](pipeline_stage1/README.md)
 - [pipeline_stage2/README.md](pipeline_stage2/README.md)
 - [pipeline_stage3/README.md](pipeline_stage3/README.md)
+- [pipeline_stage4/README.md](pipeline_stage4/README.md)
 
 Some code/scripts/functions and processes used in this pipeline are direct copies or adaptations from prior EPIC genetics pipelines by: Joshua Atkins, Marie Breeur, Aurelie Gabriel, Emilie Gerard-Marchant, Manon Knuchel...
 
@@ -43,14 +45,15 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 - Directory: `pipeline_stage2/`
 - Main purpose: Export stage-1 PLINK data to per-chromosome target VCFs, phase, and impute
-- Primary input:  `analysis/<STUDY>/stage1/` plus 1000G GRCh38 reference and Eagle map
+- Primary input:  `analysis/<STUDY>/stage1/` plus 1000G GRCh38 reference and SHAPEIT5 genetic map
 - Primary output: `analysis/<STUDY>/stage2/<STUDY>_chr*_GxS.imputed.vcf.gz`
 - Submission script: `src/005_stage2.sh` 
 
 #### What this stage does:
-1. performs phasing
-2. performs imputation
-3. generates per-study phasing and imputation reports
+1. performs pre-phasing sample and variant QC
+2. phases autosomes and chrX against the 1000G reference
+3. imputes each phased chromosome against the 1000G reference panel
+4. generates per-study phasing and imputation reports
 
 ### Phasing
 
@@ -64,17 +67,18 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 #### How:
 
-- stage-1 PLINK files are exported to per-chromosome target VCFs
-- Eagle phases each study chromosome against the matching public reference chromosome
+- stage-1 PLINK files are first passed through a pre-phasing QC step (STAGE1_QC) that applies sex checks, heterozygosity filtering, duplicate removal, HWE, and MAF filters
+- the QC-cleaned data are then exported to per-chromosome target VCFs
+- SHAPEIT5 phases each study chromosome against the matching public reference chromosome
 - chrX is handled separately because `PAR1`, `nonPAR`, and `PAR2` require different treatment; see [here](https://github.com/statgen/Minimac4/issues/74)
 
 #### Data used:
 
 - stage-1 hg38 PLINK files, exported to chromosome-specific target VCFs
 - the public 1000 Genomes high-coverage GRCh38 phased reference panel
-	- the 1000 Genomes panel provides the external phased haplotypes that Eagle uses to infer study haplotypes
-- the Eagle [genetic recombination map](https://en.wikipedia.org/wiki/Genetic_map)
-	- the Eagle map supplies recombination information that helps decide where haplotypes are likely to switch
+	- the 1000 Genomes panel provides the external phased haplotypes that SHAPEIT5 uses to infer study haplotypes
+- the SHAPEIT5 [genetic recombination map](https://en.wikipedia.org/wiki/Genetic_map)
+	- the SHAPEIT5 map supplies recombination information that helps decide where haplotypes are likely to switch
 
 ### Imputation
 
@@ -100,22 +104,22 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 - the GRCh38 [reference genome](https://en.wikipedia.org/wiki/Reference_genome) FASTA used during normalization and reference preparation
 	- the GRCh38 FASTA ensures that REF and ALT alleles are interpreted on the correct genome sequence
 
-## Stage 3: Variant Annotation, QC, Conversion, and Sample QC
+## Stage 3: Sample and variant QC, variant annotation, and finalisation
 
 - Directory: `pipeline_stage3/`
 - Main purpose: Annotate rsIDs, filter imputed variants, convert to PLINK2, and perform sample QC
 - Primary input: `analysis/<STUDY>/stage2/` plus [dbSNP](https://en.wikipedia.org/wiki/DbSNP) GRCh38
-- Primary output: `analysis/<STUDY>/stage3/final/<STUDY>.pgen/.pvar/.psam`
+- Primary output: `analysis/<STUDY>/stage3/final/<STUDY>_chr*.pgen/.pvar/.psam`
 - Submission script: `src/006_stage3.sh`
 
-Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-ready study-level PLINK2 dataset. It combines four linked operations into one workflow:
+Stage 3 turns the chromosome-level imputed VCFs from stage 2 into analysis-ready per-chromosome PLINK2 datasets. It combines four linked operations into one workflow:
 
 #### What this stage does:
 
 1. variant identifier standardization
 2. variant-level QC (including HWE)
-3. conversion to PLINK2 format
-4. sample-level QC (sex, ancestry, relatedness, heterozygosity)
+3. conversion to per-chromosome PLINK2 format
+4. sample-level QC (ancestry, relatedness, heterozygosity)
 5. generate per-study QC reports
 
 #### Why:
@@ -123,22 +127,22 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-r
 - stage-2 outputs intentionally use coordinate-style IDs, but many downstream resources still expect rsIDs where available
 - imputed data need an explicit post-imputation QC layer before they are treated as analysis-ready
 - chromosome-level imputed VCFs are not the most practical final format for downstream study analyses
-- sample-level QC is needed to identify technical problems, unexpected relatedness, sex mismatches, and ancestry outliers
+- sample-level QC is needed to identify technical problems, unexpected relatedness, and ancestry outliers
 
 #### How:
 
 - each imputed chromosome is annotated against dbSNP
-- if an exact GRCh38 match exists, the variant receives its rsID
-- if no exact dbSNP match exists, the pipeline uses a fallback `CHR:POS:REF:ALT` identifier
-- a mapping file is written so the identifier transition remains auditable
+	- if an exact GRCh38 match exists, the variant receives its rsID
+	- if no exact dbSNP match exists, the pipeline uses a fallback `CHR:POS:REF:ALT` identifier
+	- a mapping file is written so the identifier transition remains auditable
 - the annotated variants are then filtered on imputation quality using `INFO/R2`
 - the data are also filtered on [minor allele frequency](https://en.wikipedia.org/wiki/Minor_allele_frequency)
-- [Hardy-Weinberg equilibrium](https://en.wikipedia.org/wiki/Hardy%E2%80%93Weinberg_principle) filtering is applied by default on autosomes
-- the filtered chromosome-level imputed VCFs are converted into PLINK2 `pgen/pvar/psam` files and merged into one study-level dataset
-- the merged study-level dataset is then used for sample QC
-- sample QC updates sex from the stage-1 `.fam`, estimates relatedness with KING, identifies [heterozygosity](https://en.wikipedia.org/wiki/Heterozygosity) outliers, performs sex checks, and runs [PCA](https://en.wikipedia.org/wiki/Principal_component_analysis)-based ancestry QC
-- a final sample-removal list is built from the required QC exclusions and ancestry outliers
-- ancestry outliers are identified and excluded by default in the final dataset
+- [Hardy-Weinberg equilibrium](https://en.wikipedia.org/wiki/Hardy%E2%80%93Weinberg_principle) filtering is applied by default on autosomes only; failing variants are written to a per-study `hwe.exclude` list for downstream use (no hard filter is applied to the final dataset)
+- the filtered per-chromosome VCFs are converted into PLINK2 `pgen/pvar/psam` files; each chromosome is finalized independently — no genome-wide merge is performed
+- sample QC uses a LD-pruned autosomal subset derived in parallel across all 22 autosomes; the per-chromosome pruned datasets are merged into a single small BED file for relatedness and PCA computation only
+- sample QC estimates relatedness with KING, identifies [heterozygosity](https://en.wikipedia.org/wiki/Heterozygosity) outliers, and runs [PCA](https://en.wikipedia.org/wiki/Principal_component_analysis)-based ancestry QC
+- recorded sex is updated from the stage-1 `.fam` file during per-chromosome finalization
+- a final sample-removal list is built from the required QC exclusions; ancestry outliers are identified but not removed by default
 - Stage 3-only tables, figures, flags, and HTML reports are written under `analysis/<STUDY>/stage3/report/`
 
 #### Data used:
@@ -148,43 +152,91 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into one analysis-r
 	- dbSNP provides rsIDs where a known GRCh38 variant match exists
 - the stage-1 `.fam` file as the authoritative recorded-sex source
 	- the stage-1 `.fam` anchors sample sex to the original study handoff
-- LD-pruned autosomal subsets derived from the stage-3 study data for relatedness and PCA-based QC
-	- the LD-pruned autosomal subset provides a stable basis for relatedness, heterozygosity, and ancestry QC
+- LD-pruned autosomal subsets derived per-chromosome in parallel and merged for relatedness and PCA-based QC
+	- the merged LD-pruned autosomal subset provides a stable basis for relatedness, heterozygosity, and ancestry QC
+
+## Stage 4: Master Report and Finalisation
+
+- Directory: `pipeline_stage4/`
+- Main purpose: Generate per-study cross-stage master HTML reports and build the final deliverable archive
+- Primary input: `analysis/<STUDY>/stage3/` outputs plus stage 2 HTML reports
+- Primary output: `final/<STUDY>/` with archive, master HTML, and QC review files
+- Submission script: `src/007_stage4.sh`
+
+Stage 4 assembles the outputs from all preceding stages into a single deliverable per study. It runs two processes:
+
+#### What this stage does:
+
+1. generate a cross-stage master HTML report integrating stage 2 and stage 3 QC summaries
+2. build a per-study archive containing the finalized PLINK2 files, QC exclude lists, and all reports
+
+#### How:
+
+- `MASTER_REPORT` reads the stage 2 and stage 3 report trees from `analysis_root` and writes a single master HTML per study
+- `FINALISE_STUDY` collects the per-chromosome PGEN files from `stage3/final/`, the QC exclude lists from `stage3/report/flags/`, and the stage 2 and stage 3 HTML reports, then packages them into a deliverable tarball under `final/<STUDY>/`
+
+#### Data used:
+
+- per-chromosome PLINK2 files from stage 3 finalization
+- HWE, relatedness, and ancestry exclude lists from stage 3 QC
+- stage 2 imputation HTML report
+- stage 3 sample and variant QC HTML report
 
 ## Output
 
-All outputs, including intermediate stages and reports, are organized as:
+All pipeline outputs are written to a date-labelled run directory on the scratch filesystem:
 
-- `analysis/<STUDY>/stage1/`
-- `analysis/<STUDY>/stage2/`
-- `analysis/<STUDY>/stage3/`
-- `analysis/<STAGE>-summary.md`
-	- provides an overview of metrics for all studies for that stage
-- `analysis/<STAGE>-pipeline_info/`
-	- provides the Nextflow trace and report for that stage
+```
+${SCRATCH}/${SCRATCH_DATE}/
+├── studies/                          # per-study stage outputs
+│   └── <STUDY>/
+│       ├── stage1/                   # stage 1 PLINK handoffs and reports
+│       ├── stage2/                   # stage 2 imputed VCFs and reports
+│       └── stage3/
+│           ├── final/                # per-chromosome PLINK2 pgen/pvar/psam files
+│           ├── report/               # QC tables, figures, flags, HTML report, manifests
+│           └── sample_review/        # het, king, and PCA files
+├── stage1/
+│   ├── work/                         # pipeline-level work root (stage 1)
+│   ├── nxf-work/                     # Nextflow task work directory (stage 1)
+│   └── .nextflow/                    # Nextflow cache and history (stage 1)
+├── stage2/
+│   ├── work/                         # Nextflow task work directory (stage 2)
+│   ├── conda/                        # Nextflow conda environment cache (stage 2)
+│   └── .nextflow/                    # Nextflow cache and history (stage 2)
+├── stage3/
+│   ├── work/                         # Nextflow task work directory (stage 3)
+│   ├── conda/                        # Nextflow conda environment cache (stage 3)
+│   └── .nextflow/                    # Nextflow cache and history (stage 3)
+├── stage4/
+│   ├── work/                         # Nextflow task work directory (stage 4)
+│   ├── conda/                        # Nextflow conda environment cache (stage 4)
+│   └── .nextflow/                    # Nextflow cache and history (stage 4)
+└── final/                            # finalised outputs (007_stage4.sh)
+    ├── <STUDY>/
+    │   ├── <STUDY>.stage3.tar.gz     # per-chromosome PLINK2 pfiles + QC exclude lists
+    │   ├── report-stage2.html
+    │   ├── report-stage3.html
+    │   ├── report-master.html
+    │   └── review/                   # het, relatedness, and PCA files
+    └── summaries/                    # stage1/2/3 summary markdown files
+```
 
-The final study files and per-study reports are organised under `final_<YYYY-MM-DD>/`:
+Stage-level summary files are written directly into `studies/`:
 
-- `final_<YYYY-MM-DD>/studies/<STUDY>/stage3/final/<STUDY>.[pgen/pvar/psam]` — analysis-ready PLINK2 dataset
-- `final_<YYYY-MM-DD>/reports/master/<STUDY>.master-report.html` — cross-stage master report
-- `final_<YYYY-MM-DD>/reports/stage2/<STUDY>.report-stage2.html` — detailed phasing and imputation report
-- `final_<YYYY-MM-DD>/reports/stage3/<STUDY>.report-stage3.html` — detailed post-imputation QC report
-- `final_<YYYY-MM-DD>/summaries/stage1-summary.md` — Stage 1 summary across all studies
-- `final_<YYYY-MM-DD>/summaries/stage2-summary.md` — Stage 2 summary across all studies
-- `final_<YYYY-MM-DD>/summaries/stage3-summary.md` — Stage 3 summary across all studies
-- `final_<YYYY-MM-DD>/finalise_manifest.tsv` — manifest of all copied files and their copy status
-
-Temporary files and cache are kept inside the stage directories:
-
-- `pipeline_stage1/work/`
-- `pipeline_stage2/work/`
-- `pipeline_stage3/work/`
+- `studies/stage1-summary.md`
+- `studies/stage2-summary.md`
+- `studies/stage3-summary.md`
+- `studies/<STAGE>-pipeline_info/` — Nextflow trace and execution report for each stage
 
 ## How To Run 
 
 ### 0: `.env` and `tools/`
 
 You must first ensure that you have created a `.env` file at root, see: [.env.example](.env.example)
+
+> **Important — set `SCRATCH_DATE` before running.**
+> All pipeline stages write their outputs under `${SCRATCH}/${SCRATCH_DATE}/`. You must set `SCRATCH_DATE` to a date string (e.g. `2026-05-28`) in `.env` before submitting any stage, and keep it the same value for the entire analysis run. If you start a fresh analysis, update `SCRATCH_DATE` to a new date so the new run writes to a separate directory. The `.env.example` ships with `SCRATCH_DATE="CHANGE-ME"` as a deliberate placeholder.
 
 You must set-up a minimal `conda` environment:
 
@@ -210,7 +262,7 @@ sbatch src/001_data-genetics.sh
 
 We download all of the required reference data:
 1. 1000 Genomes NYGC 2022 high-coverage VCFs (GRCh38)
-2. Eagle hg38 recombination map with chrX
+2. SHAPEIT5 GRCh38 genetic map
 3. dbSNP GRCh38 VCF
 4. Annovar hg38 Database
 
@@ -240,16 +292,10 @@ Before progressing to `stage2` and `stage3` and from `stage3` to finalisation, y
 
 ### 5: report and finalising
 
-With all stages finished we can make final study specific reports to be packaged alongside the genetics data:
+With all stages finished we generate the master cross-stage HTML reports and build the final deliverable archive for each study:
 
 ```bash
-sbatch src/007_report.sh
-```
-
-We can then create a finalised repositroy with all data and reports ready for downstream analysis and dissemination:
-
-```bash
-sbatch src/008_finalise.sh
+bash src/007_stage4.sh
 ```
 
 ### testing/other
@@ -260,14 +306,13 @@ We can perform a test across a single study if needed; we use `Glbd_01` for test
 STAGE1_SCRIPTS=process_glbd_01.py sbatch src/004_stage1.sh
 sbatch src/005_stage2.sh --study Glbd_01
 sbatch src/006_stage3.sh --study Glbd_01
-bash src/007_report.sh --study Glbd_01
-bash src/008_finalise.sh --study Glbd_01
+bash src/007_stage4.sh --study Glbd_01
 ```
 
-Ancestry outliers are excluded by default. To retain ancestry outliers in the final dataset:
+Relatedness and ancestry outlier exclusions are off by default. To enable them:
 
 ```bash
-sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
+sbatch src/006_stage3.sh --exclude-related --exclude-ancestry-outliers
 ```
 
 ## Methods And Thresholds Summary
@@ -288,12 +333,13 @@ sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 
 | Method area | What is done | Active arguments / thresholds | Notes |
 | --- | --- | --- | --- |
-| Target VCF export | Stage-1 PLINK data are exported chromosome by chromosome to target VCF | Chromosomes renamed to UCSC style; IDs rewritten to `CHROM:POS:REF:ALT`; multiallelics split | Chromosomes absent in stage 1 are skipped cleanly |
+| Pre-phasing QC | Stage-1 PLINK handoffs are filtered before phasing to remove problematic samples and variants | Sex check: F-stat < 0.2 (female), > 0.8 (male); het outliers: > 3.0 SD; KING duplicate cutoff: 0.354; HWE p < 0.000001; MAF < 0.005 | Requires ≥ 100 chrX variants for sex check; sex mismatches, het outliers, and duplicates are removed; HWE and MAF filters applied on autosomes |
+| Target VCF export | QC-cleaned PLINK data are exported chromosome by chromosome to target VCF | Chromosomes renamed to UCSC style; IDs rewritten to `CHROM:POS:REF:ALT`; multiallelics split | Chromosomes absent in stage 1 are skipped cleanly |
 | Reference preparation | 1000 Genomes reference VCFs are normalized and converted to per-chromosome BCF / `msav` files | Reference filter includes `MAC >= 10` during prep; chrX keeps SNPs and indels only | chrX is handled as `PAR1`, `nonPAR`, and `PAR2` |
-| Phasing | Eagle phases each study chromosome against the matching reference chromosome | `eagle_threads = 8`; Eagle uses the public recombination map | chrX is phased block by block rather than as one file |
-| Imputation | Minimac4 imputes each phased chromosome against the matching `msav` reference panel | `min_r2 = 0.3`; `minimac_batch_size = 900`; `minimac_threads = 8` | Final stage-2 VCFs retain imputation INFO metrics including `R2` |
-| chrX handling | chrX is processed separately from autosomes | Blocks: `PAR1`, `nonPAR`, `PAR2`; block is skipped if no overlap or too few target variants exist | Successful chrX blocks are concatenated; empty chrX output is written if none survive |
-| Task runtime / retries | Internal stage-2 tasks are submitted to Slurm through Nextflow | Partition `low_p`; task walltime `10h`; retries only for exit codes `137`, `140`, `143`; `maxRetries = 2` | Intended to tolerate interruption-style failures without masking real data errors |
+| Phasing | SHAPEIT5 phases each study chromosome against the matching reference chromosome | `phase_cpus = 4`; uses SHAPEIT5 genetic recombination map | chrX is phased block by block as `PAR1`, `nonPAR`, `PAR2`; SHAPEIT5 outputs BCF which is converted to VCF.gz |
+| Imputation | Minimac4 imputes each phased chromosome against the matching `msav` reference panel | `min_r2 = 0.3`; `minimac_batch_size = 200`; `minimac_threads = 4` | Final stage-2 VCFs retain imputation INFO metrics including `R2` |
+| chrX handling | chrX is processed separately from autosomes | Blocks: `PAR1`, `nonPAR`, `PAR2`; block is skipped if no overlap or too few target variants exist; `chrx_min_ratio = 0.0` | Successful chrX blocks are concatenated; empty chrX output is written if none survive |
+| Task runtime / retries | Internal stage-2 tasks are submitted to Slurm through Nextflow | Partition `low_p`; retries for exit codes `137`, `140`, `143`; `maxRetries = 2`; `errorStrategy = finish` | Tolerates interruption-style failures without masking real data errors; REPORTING retried up to 2 times for transient NFS errors |
 
 ### Stage 3
 
@@ -303,12 +349,13 @@ sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 | Variant QC: imputation quality | Variants are filtered on imputation quality | `min_r2 = 0.3` | Applied before PLINK2 conversion |
 | Variant QC: allele frequency | Variants are filtered on minor allele frequency | `maf = 0.01` | Applied together with the `R2` filter |
 | Variant QC: HWE | Hardy-Weinberg equilibrium filtering is applied by default on autosomes | `run_hwe = true`; `hwe_p = 0.000005`; `hwe_k = 0`; mode `midp keep-fewhet` | chrX is not HWE filtered |
-| PLINK2 conversion | Filtered imputed VCFs are converted to chromosome-level `pgen/pvar/psam` and then merged | Uses dosage import from `HDS`; chrX uses `--split-par b38` and `--lax-chrx-import` | Produces one merged study-level PLINK2 dataset before sample QC |
-| Sample QC: relatedness | Related or duplicate samples are identified with KING | `king_cutoff = 0.0884` | Related samples are always added to the removal list |
+| PLINK2 conversion | Filtered imputed VCFs are converted to per-chromosome `pgen/pvar/psam` files; each chromosome is finalized independently | Uses dosage import from `HDS`; chrX uses `--split-par b38` and `--lax-chrx-import` | Final output is per-chromosome; no genome-wide merge is performed |
+| LD pruning for QC | Per-chromosome LD pruning is run in parallel across all 22 autosomes; pruned BED files are merged into one small genome-wide BED for sample QC only | `--indep-pairwise 1500 150 0.2`; duplicate variant IDs resolved with `--set-all-var-ids '@:#:$r:$a' --rm-dup force-first` | The merged LD-pruned BED is an intermediate used only for KING and PCA; it is not the final output |
+| Sample QC: relatedness | Related or duplicate samples are identified with KING | `king_cutoff = 0.0884` | Relatedness is always computed and reported; exclusion from the final dataset only happens when `--exclude-related` is set (default: off) |
 | Sample QC: heterozygosity | Heterozygosity outliers are identified from the LD-pruned autosomal dataset | `het_sd_threshold = 3.0` | Samples beyond the SD threshold are added to the removal list |
 | Sample QC: ancestry identification | PCA-based ancestry outliers are identified for every study | `ancestry_pc_count = 10`; `ancestry_z_threshold = 6.0` | Identification is always performed |
-| Sample QC: ancestry exclusion | Ancestry outliers are excluded from the final dataset by default | `exclude_ancestry_outliers = true` by default; use `--no-exclude-ancestry-outliers` to retain them | Ancestry outlier detection always runs; only the removal step is conditional |
-| Sample QC: sex update and sex check | Recorded sex is updated from the stage-1 `.fam`, then genotype-derived sex is checked | No separate numeric threshold exposed in params | Sex mismatches are always added to the removal list |
+| Sample QC: ancestry exclusion | Ancestry outliers are optionally excluded from the final dataset | `exclude_ancestry_outliers = false` by default; use `--exclude-ancestry-outliers` to remove them | Ancestry outlier detection always runs; only the removal step is conditional |
+| Sample QC: sex update | Recorded sex is updated from the stage-1 `.fam` during per-chromosome finalization | No separate numeric threshold | Applied in FINALIZE_CHROM alongside sample removal |
 
 ### Summary Table
 
@@ -316,37 +363,198 @@ sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
 
 | Study | N | Variants | Mean ER2 | Mean R2 | AF Pearson R |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Brea_01_Erneg | 897 | 11,518,166 | 0.9500 | 0.780 | 0.8723 |
-| Brea_02 | 6,805 | 11,145,742 | 0.9346 | 0.696 | 0.8854 |
-| Clrt_01 | 3,511 | 11,479,634 | 0.9537 | 0.773 | 0.8834 |
-| Ecvd_01 | 8,270 | 10,975,074 | 0.9188 | 0.684 | 0.8850 |
-| Ecvd_02 | 7,686 | 6,645,327 | 0.8025 | 0.506 | 0.9053 |
-| Ecvd_03 | 8,192 | 4,734,296 | 0.7876 | 0.481 | 0.8984 |
-| Glbd_01 | 108 | 11,596,213 | 0.9428 | 0.815 | 0.8549 |
-| Inte_01 | 8,497 | 11,348,800 | 0.9448 | 0.739 | 0.8859 |
-| Inte_02 | 6,370 | 11,056,384 | 0.9162 | 0.685 | 0.8861 |
-| Inte_03 | 4,789 | 10,732,430 | 0.9242 | 0.698 | 0.8839 |
-| Kidn_01 | 328 | 11,536,302 | 0.9493 | 0.810 | 0.8640 |
-| Kidn_02 | 245 | 11,511,675 | 0.9736 | 0.902 | 0.8548 |
-| Lung_01 | 2,296 | 11,427,622 | 0.9211 | 0.716 | 0.8835 |
-| Lymp_01 | 433 | 11,601,660 | 0.9445 | 0.805 | 0.8717 |
-| Neuro_01 | 4,415 | 10,861,268 | 0.8546 | 0.626 | 0.8910 |
-| Ovar_01 | 1,256 | 11,537,933 | 0.9404 | 0.732 | 0.8824 |
-| Panc_01 | 673 | 11,574,108 | 0.9369 | 0.781 | 0.8754 |
-| Panc_02 | 164 | 11,550,880 | 0.9550 | 0.845 | 0.8540 |
-| Pros_01 | 709 | 11,504,324 | 0.9520 | 0.789 | 0.8691 |
-
-| Pros_03 | 1,066 | 11,525,173 | 0.9389 | 0.738 | 0.8791 |
-| Pros_04 | 1,289 | 11,254,081 | 0.8920 | 0.730 | 0.8868 |
-| Stom_01 | 304 | 11,594,744 | 0.9488 | 0.813 | 0.8650 |
-| Uadt_01 | 198 | 11,550,517 | 0.9414 | 0.791 | 0.8611 |
+| Brea_01_Erneg | 987 | 11,593,992 | 0.9435 | 0.781 | 0.8729 |
+| Brea_02 | 7,348 | 11,634,844 | 0.9328 | 0.685 | 0.8872 |
+| Clrt_01 | 4,375 | 11,575,819 | 0.9513 | 0.761 | 0.8818 |
+| Ecvd_01 | 9,238 | 11,617,557 | 0.9152 | 0.669 | 0.8873 |
+| Ecvd_02 | 8,561 | 11,381,963 | 0.8923 | 0.496 | 0.9142 |
+| Ecvd_03 | 8,479 | 9,644,865 | 0.9080 | 0.459 | 0.9149 |
+| Glbd_01 | 114 | 11,617,976 | 0.9416 | 0.840 | 0.8518 |
+| Inte_01 | 9,140 | 11,576,056 | 0.9436 | 0.733 | 0.8860 |
+| Inte_02 | 7,244 | 11,648,231 | 0.9129 | 0.670 | 0.8885 |
+| Inte_03 | 6,140 | 11,228,590 | 0.9197 | 0.685 | 0.8859 |
+| Kidn_01 | 345 | 11,614,105 | 0.9420 | 0.814 | 0.8640 |
+| Kidn_02 | 258 | 11,556,383 | 0.9778 | 0.909 | 0.8553 |
+| Lung_01 | 2,414 | 11,655,446 | 0.9326 | 0.712 | 0.8846 |
+| Lymp_01 | 457 | 11,659,973 | 0.9417 | 0.811 | 0.8711 |
+| Neuro_01 | 4,830 | 11,852,050 | 0.9031 | 0.626 | 0.8941 |
+| Ovar_01 | 1,282 | 11,688,077 | 0.9319 | 0.729 | 0.8826 |
+| Panc_01 | 699 | 11,605,968 | 0.9427 | 0.794 | 0.8728 |
+| Panc_02 | 174 | 11,585,552 | 0.9487 | 0.850 | 0.8549 |
+| Pros_01 | 827 | 11,576,657 | 0.9461 | 0.791 | 0.8696 |
+| Pros_03 | 1,115 | 11,658,676 | 0.9318 | 0.737 | 0.8802 |
+| Pros_04 | 1,464 | 11,325,579 | 0.9339 | 0.756 | 0.8860 |
+| Stom_01 | 308 | 11,632,113 | 0.9401 | 0.819 | 0.8646 |
+| Uadt_01 | 206 | 11,652,795 | 0.9320 | 0.798 | 0.8630 |
 
 *N and Variants reflect the Stage 3 final dataset after R²/MAF/HWE variant filtering and sex/relatedness/heterozygosity/ancestry sample QC. Imputation metrics are from Stage 2. Per-study details are in the master reports under `report/`.*
 
-**Total unique participants across all 24 studies: 55,319** (70,078 total sample-study pairs; 9,738 participants appear in two or more studies).
+**Total unique participants across all 23 studies: 58,575** (76,005 total sample-study pairs; 11,416 participants appear in two or more studies).
 
 ### Sample Overlap
 
 The UpSet plot below shows the intersection sizes across studies. Each bar represents the number of participants shared by the indicated combination of studies; horizontal bars on the left show each study's total sample count. Single-study bars (one dot) represent participants unique to that study.
 
-![Sample overlap across EPIC genetics studies](report/sample_overlap_upset.png)
+![Sample overlap across EPIC genetics studies](docs/img/sample_overlap_upset.png)
+
+## Filtering Steps Reference
+
+All numeric filters applied across the three pipeline stages are listed below. Stage 1 and Stage 2 filters are set in the respective `nextflow.config` and `params.yaml` files; Stage 3 filters are set in `src/006_stage3.sh` and passed as Nextflow parameters.
+
+| Filter | Stage | Threshold | Description |
+| --- | --- | --- | --- |
+| Variant MAF (pre-phasing) | Stage 1 | MAF ≥ 0.005 | Removes rare variants from the stage-1 PLINK handoff before phasing; applied to autosomal variants to improve phasing accuracy |
+| Variant HWE (pre-phasing) | Stage 1 | p ≥ 0.000001 | Removes variants with extreme Hardy-Weinberg equilibrium departure (midp) on autosomes before phasing; reduces noise from genotyping errors |
+| Sex check (F-stat) | Stage 1 | F-stat < 0.2 → female; F-stat > 0.8 → male | Checks recorded sex against X chromosome F-statistic; samples with mismatching inferred sex are excluded; requires ≥ 100 chrX variants |
+| Heterozygosity outliers | Stage 1 | > 3.0 SD from study mean | Removes samples with excess or deficit autosomal heterozygosity, indicating sample contamination or extreme inbreeding |
+| Duplicate / MZ twin removal | Stage 1 | KING kinship > 0.354 | Removes exact duplicates and monozygotic twin pairs; the sample with more missing genotype data is removed |
+| Reference panel MAC | Stage 2 | MAC ≥ 10 | Applied during 1000G reference panel preparation; removes very low-frequency variants from the reference to ensure reliably phased haplotypes |
+| chrX nonPAR phasing ratio | Stage 2 | ratio ≥ 0.0 | Minimum fraction of target variants overlapping the reference in the chrX nonPAR block required for phasing to proceed; set to 0.0 so the block is always attempted when any overlap exists |
+| Imputation quality (R²) | Stage 2 | R² ≥ 0.3 | Minimac4 `--min-r2` flag; imputed variants below this R² threshold are excluded from the stage-2 output VCFs |
+| Empirical validation minimum N | Stage 2 | N ≥ 20 samples | Minimum study size to compute empirical dosage R² (leave-one-out validation at genotyped sites); smaller studies skip this metric |
+| Dose-zero minimum N | Stage 2 | N ≥ 5 samples | Minimum study size to report dose-zero statistics in the stage-2 report |
+| Summary report R² threshold | Stage 2 | R² ≥ 0.3 | Minimum R² for variants included in stage-2 summary counts and plots |
+| High-quality imputation threshold | Stage 2 | R² ≥ 0.8 | R² threshold used to classify a variant as high quality in the stage-2 summary report; reported as a separate count alongside the total imputed variants |
+| Imputation quality (R²) | Stage 3 | R² ≥ 0.3 | Post-imputation filter on `INFO/R2` applied before PLINK2 conversion; removes poorly imputed variants from the final dataset |
+| Minor allele frequency | Stage 3 | MAF ≥ 0.01 | Applied together with the R² filter before PLINK2 conversion; removes very rare variants from the final dataset |
+| Hardy-Weinberg equilibrium | Stage 3 | p ≥ 0.000005 | Applied on autosomes only (`midp keep-fewhet`); chrX is not HWE filtered; removes variants deviating from equilibrium expectation |
+| Relatedness / kinship | Stage 3 | KING kinship ≥ 0.0884 | Identifies sample pairs at 2nd-degree or closer relationship; the identified count is always reported; one sample per pair is removed only when `--exclude-related` is set (default: off) |
+| Heterozygosity outliers | Stage 3 | > 3.0 SD from study mean | Removes samples with excess or deficit heterozygosity from the LD-pruned autosomal dataset post-imputation |
+| Ancestry outliers | Stage 3 | z-score ≥ 6.0 on 10 PCs | PCA-based ancestry outlier identification using 1000G reference principal components; the identified count is always reported; outliers removed only when `--exclude-ancestry-outliers` is set (default: off) |
+
+## Finalised Data
+
+Each study's deliverable is written to `final/<STUDY>/` by stage 4. This section describes what is in that directory and how to work with it.
+
+### Directory layout
+
+```
+final/<STUDY>/
+├── <STUDY>.tar.gz        # per-chromosome PLINK2 files (pgen/pvar/psam)
+├── report-master.html    # cross-stage master QC report
+├── report-stage2.html    # stage 2 imputation report
+├── report-stage3.html    # stage 3 sample and variant QC report
+└── review/
+    ├── related.exclude   # sample IDs flagged as related (KING ≥ 0.0884)
+    ├── ancestry.exclude  # sample IDs flagged as ancestry outliers (PCA z-score ≥ 6.0)
+    ├── hwe.exclude       # variant IDs failing HWE (p < 0.000005) on autosomes
+    ├── het.het           # per-sample autosomal heterozygosity statistics
+    ├── king.kin0         # pairwise kinship coefficients (KING format)
+    ├── pca.eigenvec      # per-sample PCA scores (10 PCs)
+    └── pca.eigenval      # PCA eigenvalues
+```
+
+### Extracting the archive
+
+Extract the tarball in the `final/<STUDY>/` directory. This produces a `<STUDY>/` subdirectory containing all per-chromosome PLINK2 files:
+
+```bash
+cd final/<STUDY>
+tar -xzf <STUDY>.tar.gz
+```
+
+The extracted directory contains 23 chromosome pairs plus one sample file:
+
+```
+<STUDY>/
+├── <STUDY>_chr1.pgen
+├── <STUDY>_chr1.pvar
+...
+├── <STUDY>_chr22.pgen
+├── <STUDY>_chr22.pvar
+├── <STUDY>_chrX.pgen
+├── <STUDY>_chrX.pvar
+└── <STUDY>.psam
+```
+
+Each chromosome is a self-contained PLINK2 dataset. The `.psam` is shared across all chromosomes; all per-chromosome `pgen/pvar` files reference the same sample order.
+
+### Loading the data in PLINK2
+
+Reference a chromosome using `--pfile` with the chromosome-specific prefix (no extension):
+
+```bash
+plink2 --pfile <STUDY>/<STUDY>_chr1 [...]
+```
+
+All chromosomes share the same sample list, so the `.psam` from any chromosome can be used as the sample reference. PLINK2 will locate the matching `.psam` automatically from the prefix.
+
+### Applying QC exclusions
+
+The pipeline applies sample exclusions for heterozygosity outliers by default. Relatedness and ancestry exclusions are **off by default** and are provided as `review/` files for downstream analysts to apply as appropriate for each analysis.
+
+The HWE exclude list is also intentionally **not hard-applied** to the final PGEN files: HWE filtering may be study-specific (e.g. case-only strata or X-linked variants), so the list is provided for analyst use rather than applied universally.
+
+#### Sample exclusions
+
+`review/related.exclude` and `review/ancestry.exclude` are sample-level files used with `--remove`:
+
+```bash
+# Apply relatedness exclusion to a single chromosome
+plink2 \
+  --pfile <STUDY>/<STUDY>_chr1 \
+  --remove review/related.exclude \
+  --make-pgen \
+  --out <STUDY>_chr1_unrelated
+```
+
+```bash
+# Apply both relatedness and ancestry exclusions together
+plink2 \
+  --pfile <STUDY>/<STUDY>_chr1 \
+  --remove <(cat review/related.exclude review/ancestry.exclude | sort -u) \
+  --make-pgen \
+  --out <STUDY>_chr1_filtered
+```
+
+#### Variant exclusions
+
+`review/hwe.exclude` is a variant-level file used with `--exclude`:
+
+```bash
+# Apply HWE exclusion to a single chromosome
+plink2 \
+  --pfile <STUDY>/<STUDY>_chr1 \
+  --exclude review/hwe.exclude \
+  --make-pgen \
+  --out <STUDY>_chr1_hwe
+```
+
+#### Combined sample and variant exclusions
+
+```bash
+plink2 \
+  --pfile <STUDY>/<STUDY>_chr1 \
+  --remove review/related.exclude \
+  --exclude review/hwe.exclude \
+  --make-pgen \
+  --out <STUDY>_chr1_qc
+```
+
+To apply exclusions across all chromosomes in a loop:
+
+```bash
+STUDY="Glbd_01"
+for chr in {1..22} X; do
+  plink2 \
+    --pfile ${STUDY}/${STUDY}_chr${chr} \
+    --remove review/related.exclude \
+    --exclude review/hwe.exclude \
+    --make-pgen \
+    --out ${STUDY}_qc/${STUDY}_chr${chr}
+done
+```
+
+### Review files
+
+The `review/` files are written by stage 3 and preserved in the deliverable for post-hoc analyst inspection:
+
+| File | Contents | Use |
+| --- | --- | --- |
+| `related.exclude` | Sample IDs with KING kinship ≥ 0.0884 (2nd-degree or closer) | Pass to `--remove` to drop related individuals |
+| `ancestry.exclude` | Sample IDs identified as ancestry outliers on 10 PCs (z-score ≥ 6.0) | Pass to `--remove` to restrict to the primary ancestry cluster |
+| `hwe.exclude` | Variant IDs failing HWE (p < 0.000005) on autosomes | Pass to `--exclude` to remove HWE-failing variants |
+| `het.het` | Per-sample autosomal heterozygosity (PLINK2 `.het` format) | Inspect outlier distribution; samples beyond 3 SD are already removed from the PGEN files |
+| `king.kin0` | Pairwise kinship coefficients for all sample pairs (KING `.kin0` format) | Inspect relatedness graph; pairs above 0.0884 appear in `related.exclude` |
+| `pca.eigenvec` | Per-sample scores on 10 PCs | Use for stratification correction in association analyses; ancestry outliers flagged in `ancestry.exclude` are visible as outliers in these scores |
+| `pca.eigenval` | Variance explained by each of the 10 PCs | Useful for scree plots and deciding how many PCs to include as covariates |

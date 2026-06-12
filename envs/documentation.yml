@@ -1,0 +1,14 @@
+name: epic_documentation
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Pin below pandas 3.0: upsetplot's fillna(inplace=True) styling calls
+  # silently no-op under the forced Copy-on-Write in pandas>=3.0, leaving NaN
+  # edgecolors that crash matplotlib (ValueError: Invalid RGBA argument: nan).
+  - python=3.11
+  - numpy<2
+  - pandas<3
+  - matplotlib-base
+  - seaborn
+  - upsetplot

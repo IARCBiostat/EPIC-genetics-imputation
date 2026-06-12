@@ -1,0 +1,1 @@
+--8<-- "pipeline_stage1/README.md"

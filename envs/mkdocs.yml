@@ -1,0 +1,55 @@
+site_name: EPIC Genetics Pipeline
+docs_dir: ../src/docs
+site_dir: ../docs
+site_description: Multi-study GWAS imputation pipeline for EPIC cancer cohort research
+repo_url: https://github.com/mattlee821/EPIC-genetics-imputation
+repo_name: mattlee821/EPIC-genetics-imputation
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: teal
+      accent: cyan
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.snippets:
+      base_path: ['.']
+      check_paths: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - admonition
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
+
+validation:
+  links:
+    not_found: warn
+
+nav:
+  - Home: index.md
+  - Pipeline:
+    - Overview: pipeline/overview.md
+    - Stage 1 — Harmonisation: pipeline/stage1.md
+    - Stage 2 — Phasing & Imputation: pipeline/stage2.md
+    - Stage 3 — Post-imputation QC: pipeline/stage3.md
+    - Stage 4 — Reports & Finalisation: pipeline/stage4.md
+  - Data:
+    - Studies: data/index.md
+    - Using Finalised Data: data/usage.md

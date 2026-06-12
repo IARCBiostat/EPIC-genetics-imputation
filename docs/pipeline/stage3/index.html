@@ -1,0 +1,1618 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-study GWAS imputation pipeline for EPIC cancer cohort research">
+      
+      
+      
+      
+        <link rel="prev" href="../stage2/">
+      
+      
+        <link rel="next" href="../stage4/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Stage 3 — Post-imputation QC - EPIC Genetics Pipeline</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#pipeline_stage3" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EPIC Genetics Pipeline" class="md-header__button md-logo" aria-label="EPIC Genetics Pipeline" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EPIC Genetics Pipeline
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Stage 3 — Post-imputation QC
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/mattlee821/EPIC-genetics-imputation" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    mattlee821/EPIC-genetics-imputation
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Pipeline
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../data/" class="md-tabs__link">
+          
+  
+  
+  Data
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EPIC Genetics Pipeline" class="md-nav__button md-logo" aria-label="EPIC Genetics Pipeline" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    EPIC Genetics Pipeline
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/mattlee821/EPIC-genetics-imputation" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    mattlee821/EPIC-genetics-imputation
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stage1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 1 — Harmonisation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stage2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 2 — Phasing & Imputation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 3 — Post-imputation QC
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 3 — Post-imputation QC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-stage-3-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Stage 3 Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-how-to-run-stage-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. How To Run Stage 3
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-ordered-execution-inside-stage-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Ordered Execution Inside Stage 3
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Ordered Execution Inside Stage 3">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-step-1-prepare-dbsnp-per-chromosome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Step 1: Prepare dbSNP Per Chromosome
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-step-2-read-stage-2-imputed-vcfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Step 2: Read Stage-2 Imputed VCFs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-step-3-annotate-rsids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Step 3: Annotate rsIDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-step-4-normalize-variant-ids-and-write-a-mapping-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Step 4: Normalize Variant IDs And Write A Mapping File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-step-5-filter-by-imputation-quality-and-maf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Step 5: Filter By Imputation Quality And MAF
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-step-6-convert-each-chromosome-to-plink2-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 Step 6: Convert Each Chromosome To PLINK2 Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-step-7-apply-hwe-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Step 7: Apply HWE Filtering
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-step-8-merge-all-chromosomes-per-study" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Step 8: Merge All Chromosomes Per Study
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-step-9-update-sex-from-stage-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Step 9: Update Sex From Stage 1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-step-10-build-the-sample-qc-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 Step 10: Build The Sample-QC Inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-step-11-run-sample-qc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 Step 11: Run Sample QC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#312-step-12-identify-ancestry-outliers-for-every-study" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.12 Step 12: Identify Ancestry Outliers For Every Study
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#313-step-13-build-the-final-removal-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.13 Step 13: Build The Final Removal List
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#314-step-14-finalize-the-study-level-plink2-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.14 Step 14: Finalize The Study-Level PLINK2 Dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-stage-3-reporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Stage 3 Reporting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Stage 3 Reporting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-report-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Report Contents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-visualizations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Visualizations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-output-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Output Conventions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Output Conventions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-final-dataset-final" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Final Dataset (final/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-intermediate-process-assets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Intermediate Process Assets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-reporting-assets-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Reporting Assets (report/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stage4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 4 — Reports & Finalisation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Studies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data/usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using Finalised Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-stage-3-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Stage 3 Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-how-to-run-stage-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. How To Run Stage 3
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-ordered-execution-inside-stage-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Ordered Execution Inside Stage 3
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Ordered Execution Inside Stage 3">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-step-1-prepare-dbsnp-per-chromosome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Step 1: Prepare dbSNP Per Chromosome
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-step-2-read-stage-2-imputed-vcfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Step 2: Read Stage-2 Imputed VCFs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-step-3-annotate-rsids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Step 3: Annotate rsIDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-step-4-normalize-variant-ids-and-write-a-mapping-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Step 4: Normalize Variant IDs And Write A Mapping File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-step-5-filter-by-imputation-quality-and-maf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Step 5: Filter By Imputation Quality And MAF
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-step-6-convert-each-chromosome-to-plink2-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 Step 6: Convert Each Chromosome To PLINK2 Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-step-7-apply-hwe-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Step 7: Apply HWE Filtering
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-step-8-merge-all-chromosomes-per-study" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Step 8: Merge All Chromosomes Per Study
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-step-9-update-sex-from-stage-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Step 9: Update Sex From Stage 1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-step-10-build-the-sample-qc-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 Step 10: Build The Sample-QC Inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-step-11-run-sample-qc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 Step 11: Run Sample QC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#312-step-12-identify-ancestry-outliers-for-every-study" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.12 Step 12: Identify Ancestry Outliers For Every Study
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#313-step-13-build-the-final-removal-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.13 Step 13: Build The Final Removal List
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#314-step-14-finalize-the-study-level-plink2-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.14 Step 14: Finalize The Study-Level PLINK2 Dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-stage-3-reporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Stage 3 Reporting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Stage 3 Reporting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-report-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Report Contents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-visualizations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Visualizations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-output-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Output Conventions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Output Conventions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-final-dataset-final" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Final Dataset (final/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-intermediate-process-assets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Intermediate Process Assets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-reporting-assets-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Reporting Assets (report/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="pipeline_stage3">pipeline_stage3<a class="headerlink" href="#pipeline_stage3" title="Permanent link">&para;</a></h1>
+<p>Stage 3 performs post-imputation QC and converts the final study outputs into PLINK2 format.</p>
+<p>This stage consumes stage-2 imputed VCFs from <code>analysis/&lt;STUDY&gt;/stage2/</code>, annotates rsIDs from dbSNP GRCh38, filters variants, merges chromosomes, performs sample QC, and writes the final study-level PLINK2 dataset to <code>analysis/&lt;STUDY&gt;/stage3/final/</code>.</p>
+<h2 id="1-stage-3-scope">1. Stage 3 Scope<a class="headerlink" href="#1-stage-3-scope" title="Permanent link">&para;</a></h2>
+<p>Stage 3 inputs are:
+- <code>analysis/&lt;STUDY&gt;/stage2/</code> (Imputed VCFs + metrics)
+- <code>analysis/&lt;STUDY&gt;/stage1/</code> (Original FAM files)
+- dbSNP GRCh38 VCF + index</p>
+<p>Stage 3 produces a finalized, analysis-ready dataset and a Stage 3-only report. Cross-stage master reports are generated separately with <code>src/007_report.sh</code>.</p>
+<p>Results are organized into a strict hierarchy under <code>analysis/&lt;STUDY&gt;/stage3/</code>:
+- <strong><code>final/</code></strong>: The definitive, QC-passed PLINK2 files.
+- <strong><code>prep_chrom/</code></strong>: Optional intermediate per-chromosome PLINK2 files when <code>--publish-intermediate-plink</code> is enabled.
+- <strong><code>sample_review/</code></strong>: All sample-level QC artifacts (PCA, KING, Het, Sexcheck).
+- <strong><code>report/</code></strong>: Consolidated dashboards, tables, and figures.</p>
+<h2 id="2-how-to-run-stage-3">2. How To Run Stage 3<a class="headerlink" href="#2-how-to-run-stage-3" title="Permanent link">&para;</a></h2>
+<p>Full run (HWE filtering and ancestry outlier exclusion are both enabled by default):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sbatch<span class="w"> </span>src/006_stage3.sh
+</code></pre></div></p>
+<p>To run a specific study:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sbatch<span class="w"> </span>src/006_stage3.sh<span class="w"> </span>--study<span class="w"> </span>Glbd_01
+</code></pre></div></p>
+<p>To retain ancestry outliers in the final dataset (detection still runs):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sbatch<span class="w"> </span>src/006_stage3.sh<span class="w"> </span>--no-exclude-ancestry-outliers
+</code></pre></div></p>
+<p>Large intermediate PLINK/PGEN/BED files are not copied into <code>analysis/</code> by default. To publish them for debugging or handoff:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sbatch<span class="w"> </span>src/006_stage3.sh<span class="w"> </span>--publish-intermediate-plink
+</code></pre></div></p>
+<h2 id="3-ordered-execution-inside-stage-3">3. Ordered Execution Inside Stage 3<a class="headerlink" href="#3-ordered-execution-inside-stage-3" title="Permanent link">&para;</a></h2>
+<p>Stage 3 is defined in <code>pipeline_stage3/main.nf</code> and uses four active modules:</p>
+<ul>
+<li><code>prepare_dbsnp.nf</code></li>
+<li><code>prepare_chrom.nf</code></li>
+<li><code>sample_review.nf</code> (<code>MERGE_STUDY</code>, <code>SEX_CHECK</code>, <code>PRUNE_AUTOSOMES</code>, <code>SAMPLE_QC</code>, <code>SAMPLE_REVIEW_SUMMARY</code>)</li>
+<li><code>finalize_study.nf</code></li>
+</ul>
+<h3 id="31-step-1-prepare-dbsnp-per-chromosome">3.1 Step 1: Prepare dbSNP Per Chromosome<a class="headerlink" href="#31-step-1-prepare-dbsnp-per-chromosome" title="Permanent link">&para;</a></h3>
+<p><code>PREP_DBSNP_CHROM</code> splits the dbSNP GRCh38 VCF into one chromosome-specific file per chromosome.</p>
+<p>For each chromosome, it:</p>
+<ol>
+<li>selects the correct NCBI <code>NC_</code> contig name</li>
+<li>extracts that contig from dbSNP</li>
+<li>renames the contig to UCSC style (<code>chr1</code>, <code>chr2</code>, ..., <code>chrX</code>)</li>
+<li>writes an indexed per-chromosome dbSNP VCF</li>
+</ol>
+<p>This makes downstream rsID annotation deterministic and chromosome-local.</p>
+<h3 id="32-step-2-read-stage-2-imputed-vcfs">3.2 Step 2: Read Stage-2 Imputed VCFs<a class="headerlink" href="#32-step-2-read-stage-2-imputed-vcfs" title="Permanent link">&para;</a></h3>
+<p>The workflow discovers:</p>
+<ul>
+<li><code>analysis/*/stage2/*_chr*_GxS.imputed.vcf.gz</code></li>
+</ul>
+<p>It parses:</p>
+<ul>
+<li>study ID</li>
+<li>chromosome</li>
+<li>VCF path</li>
+<li>VCF index path</li>
+</ul>
+<p>The resulting stage-2 study/chromosome objects are then joined to the dbSNP chromosome objects created in Step 1.</p>
+<h3 id="33-step-3-annotate-rsids">3.3 Step 3: Annotate rsIDs<a class="headerlink" href="#33-step-3-annotate-rsids" title="Permanent link">&para;</a></h3>
+<p><code>PREP_CHROM</code> first overlays dbSNP onto each imputed VCF:</p>
+<ol>
+<li><code>bcftools annotate -a dbsnp_chr&lt;CHR&gt;.vcf.gz -c ID</code></li>
+<li>stream the annotated VCF into variant-ID normalization</li>
+</ol>
+<p>At this point, variants with an exact dbSNP match receive their rsID.</p>
+<h3 id="34-step-4-normalize-variant-ids-and-write-a-mapping-file">3.4 Step 4: Normalize Variant IDs And Write A Mapping File<a class="headerlink" href="#34-step-4-normalize-variant-ids-and-write-a-mapping-file" title="Permanent link">&para;</a></h3>
+<p>After dbSNP annotation, <code>normalize_variant_ids.py</code> standardizes the chromosome-level variant IDs.</p>
+<p>The normalization policy is:</p>
+<ol>
+<li>keep the rsID when dbSNP provides one</li>
+<li>otherwise use <code>chr:pos:REF:ALT</code></li>
+</ol>
+<p>This step also writes:</p>
+<ul>
+<li><code>&lt;STUDY&gt;_chr&lt;CHR&gt;.variant_id_map.tsv.gz</code></li>
+</ul>
+<p>That mapping file is the audit trail between the original stage-2 ID, the dbSNP annotation result, and the final stage-3 ID.</p>
+<p>Annotation, ID normalization, and R2/MAF filtering are streamed together so stage 3 does not write full annotated or normalized temporary VCFs.</p>
+<h3 id="35-step-5-filter-by-imputation-quality-and-maf">3.5 Step 5: Filter By Imputation Quality And MAF<a class="headerlink" href="#35-step-5-filter-by-imputation-quality-and-maf" title="Permanent link">&para;</a></h3>
+<p>Still within <code>PREP_CHROM</code>, the annotated and normalized VCF is filtered with:</p>
+<ul>
+<li><code>INFO/R2 &gt;= params.min_r2</code></li>
+<li><code>INFO/MAF &gt;= params.maf</code></li>
+</ul>
+<p>By default, stage 3 uses:</p>
+<ul>
+<li><code>min_r2: 0.3</code></li>
+<li><code>maf: 0.01</code></li>
+</ul>
+<p>The output of this step is the chromosome-level filtered VCF that feeds PLINK2 conversion.</p>
+<h3 id="36-step-6-convert-each-chromosome-to-plink2-format">3.6 Step 6: Convert Each Chromosome To PLINK2 Format<a class="headerlink" href="#36-step-6-convert-each-chromosome-to-plink2-format" title="Permanent link">&para;</a></h3>
+<p><code>PREP_CHROM</code> imports the filtered imputed VCF with <code>plink2</code> using:</p>
+<ul>
+<li><code>dosage=HDS</code></li>
+<li><code>--make-pgen</code></li>
+<li><code>--sort-vars</code></li>
+</ul>
+<p>ChrX receives additional handling with:</p>
+<ul>
+<li><code>--split-par b38</code></li>
+<li><code>--lax-chrx-import</code></li>
+</ul>
+<p>This step produces:</p>
+<ul>
+<li><code>&lt;STUDY&gt;_chr&lt;CHR&gt;.pgen</code></li>
+<li><code>&lt;STUDY&gt;_chr&lt;CHR&gt;.pvar</code></li>
+<li><code>&lt;STUDY&gt;_chr&lt;CHR&gt;.psam</code></li>
+</ul>
+<h3 id="37-step-7-apply-hwe-filtering">3.7 Step 7: Apply HWE Filtering<a class="headerlink" href="#37-step-7-apply-hwe-filtering" title="Permanent link">&para;</a></h3>
+<p>HWE filtering is enabled by default in stage 3.</p>
+<p>Current behavior:</p>
+<ul>
+<li>autosomes: HWE is applied with <code>plink2 --hwe</code></li>
+<li>chrX: HWE is not applied</li>
+</ul>
+<p>Default parameters:</p>
+<ul>
+<li><code>run_hwe: true</code></li>
+<li><code>hwe_p: 0.000005</code></li>
+<li><code>hwe_k: 0</code></li>
+</ul>
+<p>The per-chromosome variant QC table records:</p>
+<ul>
+<li>input variants</li>
+<li>rsID-assigned variants</li>
+<li>fallback-ID variants</li>
+<li>post-R2/MAF variants</li>
+<li>final variants after HWE</li>
+</ul>
+<h3 id="38-step-8-merge-all-chromosomes-per-study">3.8 Step 8: Merge All Chromosomes Per Study<a class="headerlink" href="#38-step-8-merge-all-chromosomes-per-study" title="Permanent link">&para;</a></h3>
+<p><code>MERGE_STUDY</code> begins sample review by merging the chromosome-level PLINK2 files into one study-level dataset:</p>
+<ul>
+<li><code>&lt;STUDY&gt;_allchr.pgen</code></li>
+<li><code>&lt;STUDY&gt;_allchr.pvar</code></li>
+<li><code>&lt;STUDY&gt;_allchr.psam</code></li>
+</ul>
+<p>This merge is the working study-level dataset used for all downstream sample QC.</p>
+<h3 id="39-step-9-update-sex-from-stage-1">3.9 Step 9: Update Sex From Stage 1<a class="headerlink" href="#39-step-9-update-sex-from-stage-1" title="Permanent link">&para;</a></h3>
+<p>Stage 3 uses the stage-1 <code>.fam</code> file as the authoritative sample-sex source.</p>
+<p>It extracts:</p>
+<ul>
+<li><code>FID</code></li>
+<li><code>IID</code></li>
+<li>sex code</li>
+</ul>
+<p>and writes a sex-update file. <code>SEX_CHECK</code> applies it to the chrX QC bed set for sex check, and <code>FINALIZE_STUDY</code> applies it when writing the final stage-3 PLINK2 dataset.</p>
+<h3 id="310-step-10-build-the-sample-qc-inputs">3.10 Step 10: Build The Sample-QC Inputs<a class="headerlink" href="#310-step-10-build-the-sample-qc-inputs" title="Permanent link">&para;</a></h3>
+<p>The split sample-review processes then create the study-level QC assets needed for heterozygosity, relatedness, sex check, and ancestry:</p>
+<ol>
+<li><code>SEX_CHECK</code>: chromosome-X PLINK bed set for sex check when chrX is present</li>
+<li><code>PRUNE_AUTOSOMES</code>: LD-pruned autosome set</li>
+<li><code>SAMPLE_QC</code>: relatedness, heterozygosity, and PCA from the pruned set</li>
+<li><code>SAMPLE_REVIEW_SUMMARY</code>: final sample-exclusion manifests</li>
+</ol>
+<p>The full merged PLINK2 set is not converted to unpruned PLINK bed format; sample QC only materializes the smaller datasets required by each QC procedure.</p>
+<h3 id="311-step-11-run-sample-qc">3.11 Step 11: Run Sample QC<a class="headerlink" href="#311-step-11-run-sample-qc" title="Permanent link">&para;</a></h3>
+<p>The sample-review subprocesses perform four sample-QC procedures:</p>
+<ol>
+<li>sex check</li>
+<li>relatedness estimation / KING table</li>
+<li>heterozygosity</li>
+<li>PCA for ancestry outlier detection</li>
+</ol>
+<p>The pipeline then runs <code>identify_sample_outliers.py</code> to convert the QC outputs into study-level exclusion lists:</p>
+<ul>
+<li>sex mismatches</li>
+<li>heterozygosity outliers</li>
+<li>ancestry outliers</li>
+</ul>
+<p>Related sample removal is driven from the KING cutoff output.</p>
+<h3 id="312-step-12-identify-ancestry-outliers-for-every-study">3.12 Step 12: Identify Ancestry Outliers For Every Study<a class="headerlink" href="#312-step-12-identify-ancestry-outliers-for-every-study" title="Permanent link">&para;</a></h3>
+<p>Stage 3 always identifies ancestry outliers regardless of whether they will be excluded.</p>
+<p>The detection and exclusion steps are deliberately separated:</p>
+<ul>
+<li>ancestry outlier detection always runs and produces the PCA plot and outlier list</li>
+<li>ancestry outlier removal is enabled by default (<code>exclude_ancestry_outliers: true</code>); pass <code>--no-exclude-ancestry-outliers</code> to retain all samples in the final dataset</li>
+</ul>
+<p>This design preserves a complete ancestry-QC record even in analyses that intentionally retain the full sample set.</p>
+<h3 id="313-step-13-build-the-final-removal-list">3.13 Step 13: Build The Final Removal List<a class="headerlink" href="#313-step-13-build-the-final-removal-list" title="Permanent link">&para;</a></h3>
+<p>The removal list always includes:</p>
+<ul>
+<li>sex mismatches</li>
+<li>heterozygosity outliers</li>
+<li>related samples</li>
+</ul>
+<p>It also includes ancestry outliers by default. Pass <code>--no-exclude-ancestry-outliers</code> to omit them:</p>
+<ul>
+<li>ancestry outliers included unless <code>--no-exclude-ancestry-outliers</code> is specified</li>
+</ul>
+<p>This list is written to:</p>
+<ul>
+<li><code>&lt;STUDY&gt;.samples_to_remove.id</code></li>
+</ul>
+<h3 id="314-step-14-finalize-the-study-level-plink2-dataset">3.14 Step 14: Finalize The Study-Level PLINK2 Dataset<a class="headerlink" href="#314-step-14-finalize-the-study-level-plink2-dataset" title="Permanent link">&para;</a></h3>
+<p><code>FINALIZE_STUDY</code> applies the final removal list to the merged stage-3 pfile set.</p>
+<p><code>FINALIZE_STUDY</code> always applies the stage-1 sex update while writing the final dataset. If the removal list is non-empty, the study is also rewritten after <code>--remove</code>.</p>
+<p>The final published outputs are:</p>
+<ul>
+<li><code>analysis/&lt;STUDY&gt;/stage3/final/&lt;STUDY&gt;.pgen</code></li>
+<li><code>analysis/&lt;STUDY&gt;/stage3/final/&lt;STUDY&gt;.pvar</code></li>
+<li><code>analysis/&lt;STUDY&gt;/stage3/final/&lt;STUDY&gt;.psam</code></li>
+</ul>
+<h2 id="4-stage-3-reporting">4. Stage 3 Reporting<a class="headerlink" href="#4-stage-3-reporting" title="Permanent link">&para;</a></h2>
+<p>Stage 3 creates a Stage 3-only report at <code>analysis/&lt;STUDY&gt;/stage3/report/report-stage3.html</code>.
+This report covers post-imputation filtering and sample review only.
+Cross-stage master reports are generated separately with <code>src/007_report.sh</code>.</p>
+<h3 id="41-report-contents">4.1 Report Contents<a class="headerlink" href="#41-report-contents" title="Permanent link">&para;</a></h3>
+<p>The Stage 3 report tracks:
+- Variant ID annotation and fallback ID counts.
+- R2/MAF variant filtering counts.
+- HWE variant filtering counts.
+- Sex, relatedness, heterozygosity, and ancestry sample-review counts.</p>
+<h3 id="42-visualizations">4.2 Visualizations<a class="headerlink" href="#42-visualizations" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Filtering Counts</strong>: Variant and sample counts before and after Stage 3 filtering.</li>
+<li><strong>Ancestry Projection</strong>: PC1 vs PC2 plot identifying ancestry outliers.</li>
+</ul>
+<h2 id="5-output-conventions">5. Output Conventions<a class="headerlink" href="#5-output-conventions" title="Permanent link">&para;</a></h2>
+<h3 id="51-final-dataset-final">5.1 Final Dataset (<code>final/</code>)<a class="headerlink" href="#51-final-dataset-final" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>&lt;STUDY&gt;.pgen</code>, <code>&lt;STUDY&gt;.pvar</code>, <code>&lt;STUDY&gt;.psam</code></li>
+</ul>
+<h3 id="52-intermediate-process-assets">5.2 Intermediate Process Assets<a class="headerlink" href="#52-intermediate-process-assets" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>prep_chrom/</code></strong>: Per-chromosome PGENs after R2/MAF/HWE filtering when <code>--publish-intermediate-plink</code> is enabled. By default, these files remain in the Nextflow work cache.</li>
+<li><strong><code>sample_review/</code></strong>:<ul>
+<li><code>*.eigenvec</code> / <code>*.eigenval</code>: PCA results.</li>
+<li><code>*.kin0</code>: Kinship coefficients.</li>
+<li><code>*.het</code>: Heterozygosity statistics.</li>
+<li><code>*.sexcheck</code>: PLINK sex concordance results.</li>
+<li>Intermediate merged, chrX BED, and pruned BED files only when <code>--publish-intermediate-plink</code> is enabled.</li>
+</ul>
+</li>
+</ul>
+<h3 id="53-reporting-assets-report">5.3 Reporting Assets (<code>report/</code>)<a class="headerlink" href="#53-reporting-assets-report" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>report-stage3.html</code></strong>: The Stage 3-only study dashboard.</li>
+<li><strong><code>figures/</code></strong>: Ancestry PCA plots and QC distributions.</li>
+<li><strong><code>tables/</code></strong>: Consolidated variant and sample metric TSVs.</li>
+<li><strong><code>flags/</code></strong>: Lists of samples flagged for sex mismatches, relatedness, or ancestry.</li>
+<li><strong><code>manifests/</code></strong>: Final variant ID mappings and sample removal lists.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

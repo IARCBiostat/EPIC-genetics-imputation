@@ -1,47 +1,96 @@
-process MERGE_FOR_QC {
+process PRUNE_CHROM_FOR_QC {
+    label 'sample_review'
+    tag "${study_name}/chr${chr}"
+
+    input:
+    tuple val(study_name), val(chr), path(pgen), path(pvar), path(psam)
+
+    output:
+    tuple val(study_name), val(chr), path("${study_name}_chr${chr}_pruned.bed"), path("${study_name}_chr${chr}_pruned.bim"), path("${study_name}_chr${chr}_pruned.fam"), emit: pruned_chr
+
+    script:
+    def pfile_prefix = pgen.baseName
+    def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
+    """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
+    \$PLINK2_BIN \\
+      --pfile ${pfile_prefix} \\
+      --set-all-var-ids '@:#:\$r:\$a' \\
+      --new-id-max-allele-len 1000 missing \\
+      --rm-dup force-first \\
+      --indep-pairwise 1500 150 0.2 \\
+      --threads ${threads} \\
+      --out ${study_name}_chr${chr}_prune
+
+    \$PLINK2_BIN \\
+      --pfile ${pfile_prefix} \\
+      --set-all-var-ids '@:#:\$r:\$a' \\
+      --new-id-max-allele-len 1000 missing \\
+      --rm-dup force-first \\
+      --extract ${study_name}_chr${chr}_prune.prune.in \\
+      --threads ${threads} \\
+      --make-bed \\
+      --out ${study_name}_chr${chr}_pruned
+    """
+}
+
+process MERGE_PRUNED_FOR_QC {
+    label 'sample_review'
+    tag "${study_name}"
+    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
+        if (params.publish_intermediate_plink.toString().toBoolean() && (filename.endsWith('.bed') || filename.endsWith('.bim') || filename.endsWith('.fam'))) {
+            return "${study_name}/stage3/sample_review/${filename}"
+        }
+        null
+    }
+
+    input:
+    tuple val(study_name), path(beds), path(bims), path(fams)
+
+    output:
+    tuple val(study_name), path("${study_name}_pruned_bed.bed"), path("${study_name}_pruned_bed.bim"), path("${study_name}_pruned_bed.fam"), emit: pruned_bed
+
+    script:
+    def bed_prefixes = beds.collect { it.baseName }.join(' ')
+    def threads = task.cpus
+    def backoff_secs = (task.attempt - 1) * 30
+    """
+    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
+
+    : > merge_list.txt
+    for pfx in ${bed_prefixes}; do
+      echo "\${pfx}" >> merge_list.txt
+    done
+
+    \$PLINK2_BIN \\
+      --pmerge-list merge_list.txt bfile \\
+      --threads ${threads} \\
+      --memory 20000 \\
+      --make-bed \\
+      --out "${study_name}_pruned_bed"
+    """
+}
+
+process MAKE_UPDATE_FILES {
     label 'sample_review'
     tag "${study_name}"
     publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
         if (filename.endsWith('.sex_update.txt') || filename.endsWith('.pheno_update.txt')) {
             return "${study_name}/stage3/report/manifests/${filename}"
         }
-        if (params.publish_intermediate_plink.toString().toBoolean() && (filename.endsWith('.pgen') || filename.endsWith('.pvar') || filename.endsWith('.psam'))) {
-            return "${study_name}/stage3/merge_qc/${filename}"
-        }
         null
     }
 
     input:
-    tuple val(study_name), val(chroms), path(pgens), path(pvars), path(psams), path(stage1_fam)
+    tuple val(study_name), path(chr1_psam), path(stage1_fam)
 
     output:
-    tuple val(study_name), path("${study_name}_allchr.pgen"), path("${study_name}_allchr.pvar"), path("${study_name}_allchr.psam"), path("${study_name}.sex_update.txt"), path("${study_name}.pheno_update.txt"), emit: merged
+    tuple val(study_name), path("${study_name}.sex_update.txt"), path("${study_name}.pheno_update.txt"), emit: update_files
 
     script:
-    def pgen_list = pgens.collect { it.toString() }.join(' ')
-    def pvar_list = pvars.collect { it.toString() }.join(' ')
-    def psam_list = psams.collect { it.toString() }.join(' ')
-    def threads = task.cpus
-    def backoff_secs = (task.attempt - 1) * 120
     """
-    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
-
-    PGENS=(${pgen_list})
-    PVARS=(${pvar_list})
-    PSAMS=(${psam_list})
-
-    : > merge_list.txt
-    for idx in "\${!PGENS[@]}"; do
-      printf "%s %s %s\\n" "\${PGENS[\$idx]}" "\${PVARS[\$idx]}" "\${PSAMS[\$idx]}" >> merge_list.txt
-    done
-
-    \$PLINK2_BIN \\
-      --pmerge-list merge_list.txt \\
-      --threads ${threads} \\
-      --make-pgen \\
-      --sort-vars \\
-      --out "${study_name}_allchr"
-
     awk '
       NR==FNR {
         sex_by_iid[\$2] = \$5
@@ -56,7 +105,7 @@ process MERGE_FOR_QC {
         else                             s = 0
         print \$1, \$2, s
       }
-    ' "${stage1_fam}" ${study_name}_allchr.psam > ${study_name}.sex_update.txt
+    ' "${stage1_fam}" ${chr1_psam} > ${study_name}.sex_update.txt
 
     awk '
       BEGIN { print "#FID\tIID\tPHENO1" }
@@ -73,47 +122,7 @@ process MERGE_FOR_QC {
         else                               p = -9
         print \$1, \$2, p
       }
-    ' "${stage1_fam}" ${study_name}_allchr.psam >> ${study_name}.pheno_update.txt
-    """
-}
-
-process PRUNE_AUTOSOMES {
-    label 'sample_review'
-    tag "${study_name}"
-    publishDir "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename ->
-        if (params.publish_intermediate_plink.toString().toBoolean() && (filename.endsWith('.bed') || filename.endsWith('.bim') || filename.endsWith('.fam'))) {
-            return "${study_name}/stage3/sample_review/${filename}"
-        }
-        null
-    }
-
-    input:
-    tuple val(study_name), path(merged_pgen), path(merged_pvar), path(merged_psam)
-
-    output:
-    tuple val(study_name), path("${study_name}_pruned_bed.bed"), path("${study_name}_pruned_bed.bim"), path("${study_name}_pruned_bed.fam"), emit: pruned_bed
-
-    script:
-    def merged_prefix = merged_pgen.baseName
-    def threads = task.cpus
-    def backoff_secs = (task.attempt - 1) * 30
-    """
-    [ ${backoff_secs} -gt 0 ] && sleep ${backoff_secs}
-
-    \$PLINK2_BIN \\
-      --pfile ${merged_prefix} \\
-      --chr 1-22 \\
-      --indep-pairwise 1500 150 0.2 \\
-      --threads ${threads} \\
-      --out ${study_name}_pruned
-
-    \$PLINK2_BIN \\
-      --pfile ${merged_prefix} \\
-      --chr 1-22 \\
-      --extract ${study_name}_pruned.prune.in \\
-      --threads ${threads} \\
-      --make-bed \\
-      --out ${study_name}_pruned_bed
+    ' "${stage1_fam}" ${chr1_psam} >> ${study_name}.pheno_update.txt
     """
 }
 
@@ -208,7 +217,7 @@ process SAMPLE_REVIEW_SUMMARY {
     }
 
     input:
-    tuple val(study_name), path(related_ids), path(het), path(eigenvec), path(eigenval), path(merged_psam)
+    tuple val(study_name), path(related_ids), path(het), path(eigenvec), path(eigenval), path(chr1_psam)
     val exclude_ancestry_outliers
     val exclude_related
 
@@ -256,7 +265,7 @@ process SAMPLE_REVIEW_SUMMARY {
 
     sort -u ${study_name}.samples_to_remove.id -o ${study_name}.samples_to_remove.id
 
-    PRE_FINAL_SAMPLES=\$(awk 'NR > 1 {count++} END {print count + 0}' ${merged_psam})
+    PRE_FINAL_SAMPLES=\$(awk 'NR > 1 {count++} END {print count + 0}' ${chr1_psam})
     RELATED_IDENTIFIED_COUNT=\$(wc -l < ${study_name}.related.exclude | tr -d ' ')
     HET_COUNT=\$(wc -l < ${study_name}.heterozygosity_outliers.id | tr -d ' ')
     ANCESTRY_IDENTIFIED_COUNT=\$(wc -l < ${study_name}.ancestry.exclude | tr -d ' ')

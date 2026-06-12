@@ -162,9 +162,6 @@ def fallback_png(path: Path) -> None:
     path.write_bytes(base64.b64decode(data))
 
 
-def archive_path(stage_dir: Path, study: str) -> Path:
-    return stage_dir / f"{study}.stage3.tar.gz"
-
 
 def summarize_variant_metrics(tables_dir: Path) -> tuple[list[dict[str, object]], dict[str, int]]:
     rows: list[dict[str, object]] = []
@@ -578,9 +575,6 @@ def generate_study_report(analysis_root: Path, study: str) -> dict[str, object]:
         flags.append({"study": study, "level": "WARN", "message": "No per-chromosome variant metrics were found."})
     if not sample_row:
         flags.append({"study": study, "level": "WARN", "message": "No sample review metrics were found."})
-    study_archive = archive_path(stage_dir, study)
-    if not study_archive.exists():
-        flags.append({"study": study, "level": "WARN", "message": f"Stage 3 archive not found: {project_relative(study_archive)}"})
     write_tsv(flags, flags_dir / "stage3_flags.tsv", ["study", "level", "message"])
     write_tsv(flags, flags_dir / f"{study}_stage3_flags.tsv", ["study", "level", "message"])
 

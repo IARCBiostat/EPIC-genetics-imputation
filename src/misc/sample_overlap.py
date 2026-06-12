@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -71,12 +72,15 @@ def read_psam_ids(path: Path) -> set[str]:
 
 
 def discover_psam_files(analysis_root: Path) -> dict[str, Path]:
-    """Return {study_id: psam_path} for all Stage 3 final .psam files found."""
+    """Return {study_id: psam_path} for all Stage 3 final .psam files found.
+
+    Stage 3 writes per-chromosome psam files (<STUDY>_chr<N>.psam); chr1 is used as
+    the canonical representative since all chromosomes carry an identical sample list.
+    """
     found: dict[str, Path] = {}
-    for psam in sorted(analysis_root.glob("*/stage3/final/*.psam")):
+    for psam in sorted(analysis_root.glob("*/stage3/final/*_chr1.psam")):
         study = psam.parent.parent.parent.name
-        if psam.stem == study:
-            found[study] = psam
+        found[study] = psam
     return found
 
 
@@ -256,33 +260,21 @@ def generate_upset_plot(
         return
 
     combo_counts = _build_combo_counts(studies, study_samples, shared)
+    if not combo_counts:
+        print("WARN: No intersections to plot — plot skipped.", file=sys.stderr)
+        return
 
     # Sort studies by total N descending so the largest studies appear at top
     study_order = sorted(studies, key=lambda s: -len(study_samples[s]))
 
-    # Separate single-study and multi-study intersections
-    single: list[tuple[frozenset, int]] = []
-    multi: list[tuple[frozenset, int]] = []
-    for combo, count in combo_counts.items():
-        if count < min_intersection:
-            continue
-        (single if len(combo) == 1 else multi).append((combo, count))
-
-    # Keep top max_intersections multi-study intersections by size
-    multi.sort(key=lambda x: -x[1])
-    multi = multi[:max_intersections]
-
-    selected = single + multi
-    if not selected:
-        print("WARN: No intersections meet the minimum size — plot skipped.", file=sys.stderr)
-        return
-
-    # Build MultiIndex Series: index levels = study booleans, values = counts
-    tuples = [
-        tuple(s in combo for s in study_order)
-        for combo, _ in selected
-    ]
-    counts = [count for _, count in selected]
+    # Build the data Series from EVERY intersection — the full, disjoint
+    # partition of all samples. This is essential: upsetplot derives the
+    # per-study set-size totals from the complete input, so passing the full
+    # partition makes the totals bar equal the true study N. (The previous
+    # version pre-filtered the data before handing it to upsetplot, which made
+    # the totals undercount — e.g. Brea_01_Erneg showed 930 instead of 987.)
+    tuples = [tuple(s in combo for s in study_order) for combo in combo_counts]
+    counts = list(combo_counts.values())
 
     mi = pd.MultiIndex.from_tuples(tuples, names=study_order)
     data = pd.Series(counts, index=mi)
@@ -290,19 +282,28 @@ def generate_upset_plot(
     # Remove all-False rows (shouldn't exist, but guard against it)
     data = data[data.index.to_frame().any(axis=1)]
 
+    # Limit only the *displayed* intersection bars via `min_subset_size` so the
+    # chart stays readable; totals are unaffected because they come from the
+    # full data above. Raise the effective minimum to the size at rank
+    # `max_intersections` when there are more qualifying intersections than that.
+    sizes_desc = sorted(combo_counts.values(), reverse=True)
+    effective_min = min_intersection
+    if len(sizes_desc) > max_intersections:
+        effective_min = max(effective_min, sizes_desc[max_intersections - 1])
+
     # --- Figure ---
     fig = plt.figure(figsize=(20, 11))
     upset = UpSet(
         data,
-        subset_size="auto",
+        subset_size="sum",
         show_counts="%d",
         sort_by="cardinality",
+        min_subset_size=effective_min,
         totals_plot_elements=3,
     )
     upset.style_subsets(
         present=list(study_order),
         facecolor="#3b82f6",
-        label="overlap",
     )
     axes = upset.plot(fig)
 
@@ -412,7 +413,17 @@ def main() -> None:
 
     print_summary(studies, study_samples, matrix, shared)
 
+    total_unique = compute_unique_count(study_samples)
+    summary = {
+        "n_studies": len(studies),
+        "total_unique": total_unique,
+        "total_pairs": sum(len(v) for v in study_samples.values()),
+        "n_shared": len(shared),
+    }
+    summary_json_path = out_dir / "sample_overlap_summary.json"
+    summary_json_path.write_text(json.dumps(summary, indent=2) + "\n")
+    print(f"Summary JSON written to {summary_json_path}")
+
 
 if __name__ == "__main__":
     main()
-EOF
