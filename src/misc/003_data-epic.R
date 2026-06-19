@@ -1,7 +1,5 @@
 #!/usr/bin/env Rscript
-
 options(stringsAsFactors = FALSE)
-
 usage <- function() {
   cat(
     "Usage: Rscript src/003_data-epic.R [options]\n",
@@ -9,6 +7,11 @@ usage <- function() {
     "Build a tab-delimited EPIC study phenotype file from:\n",
     "  genetics_caco.sas7bdat, genetics_id.sas7bdat, genetics.sas7bdat,\n",
     "  and optionally Subj_Id_2015.txt for supplementary IDs.\n",
+    "\n",
+    "Country-based exclusion (Country in 6, 8, B) is applied ONCE, after\n",
+    "aggregation and the supplementary-ID merge. A sample is excluded if it is\n",
+    "flagged for an excluded country in ANY source, and a sanity check aborts\n",
+    "the run if any flagged sample survives into the output.\n",
     "\n",
     "Options:\n",
     "  --input-dir DIR            Directory containing the SAS files.\n",
@@ -23,7 +26,6 @@ usage <- function() {
     sep = ""
   )
 }
-
 script_path <- function() {
   args <- commandArgs(FALSE)
   file_arg <- grep("^--file=", args, value = TRUE)
@@ -39,18 +41,15 @@ script_path <- function() {
   base <- if (nchar(submit_dir) > 0) submit_dir else "."
   normalizePath(file.path(base, "src/003_data-epic.R"), mustWork = FALSE)
 }
-
 parse_args <- function(args, defaults) {
   opts <- defaults
   i <- 1
   while (i <= length(args)) {
     arg <- args[[i]]
-
     if (arg == "--help" || arg == "-h") {
       usage()
       quit(status = 0)
     }
-
     if (grepl("^--[^=]+=", arg)) {
       key <- sub("=.*$", "", arg)
       value <- sub("^[^=]+=", "", arg)
@@ -64,7 +63,6 @@ parse_args <- function(args, defaults) {
     } else {
       stop("Unexpected argument: ", arg, call. = FALSE)
     }
-
     if (key == "--input-dir") {
       opts$input_dir <- value
     } else if (key == "--output") {
@@ -81,12 +79,10 @@ parse_args <- function(args, defaults) {
     } else {
       stop("Unknown option: ", key, call. = FALSE)
     }
-
     i <- i + 1
   }
   opts
 }
-
 require_namespace <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
     stop(
@@ -96,21 +92,64 @@ require_namespace <- function(pkg) {
     )
   }
 }
-
 read_sas_df <- function(path) {
   as.data.frame(haven::zap_labels(haven::read_sas(path)), stringsAsFactors = FALSE)
 }
-
 as_clean_character <- function(x) {
   x <- as.character(x)
   x[x == ""] <- NA_character_
   x
 }
-
 as_clean_numeric <- function(x) {
   suppressWarnings(as.numeric(x))
 }
-
+# ── Country-based exclusion helpers ──────────────────────────────────────────
+# Exclusion is applied exactly once (in main), after aggregation and the
+# supplementary-ID merge. The raw sources are intentionally NOT row-filtered on
+# read, so that (a) per-ID country conflicts are still surfaced by
+# warn_collapsed_conflicts(), and (b) the single exclusion below can see a
+# sample's country in *every* source and drop it if flagged anywhere.
+country_excluded_id_set <- function(sources, excluded_countries) {
+  # sources: list of data.frames, each with $ID and $Country (NULL entries and
+  #          sources lacking either column are skipped).
+  # Returns the set of IDs carrying an excluded Country in ANY source. A sample
+  # flagged in one source is excluded even if another source reports a
+  # non-excluded or missing country for the same ID.
+  excluded_ids <- character(0)
+  for (src in sources) {
+    if (is.null(src) || is.null(src$ID) || is.null(src$Country) || nrow(src) == 0) {
+      next
+    }
+    ids <- as_clean_character(src$ID)
+    country <- trimws(as_clean_character(src$Country))
+    hit <- !is.na(ids) & !is.na(country) & country %in% excluded_countries
+    excluded_ids <- union(excluded_ids, unique(ids[hit]))
+  }
+  excluded_ids
+}
+assert_no_excluded_countries <- function(out, excluded_id_set, excluded_countries,
+                                         label = "final output") {
+  # Sanity check: abort the run if any sample flagged for country-based
+  # exclusion is still present, either by its (collapsed) country code or by
+  # membership in the flagged-ID set. A passing run prints a confirmation.
+  final_country <- trimws(as_clean_character(out$country))
+  bad_country <- !is.na(final_country) & final_country %in% excluded_countries
+  bad_id <- out$ID %in% excluded_id_set
+  bad <- bad_country | bad_id
+  if (any(bad)) {
+    offending <- unique(out$ID[bad])
+    stop(
+      "SANITY CHECK FAILED: ", sum(bad),
+      " sample(s) flagged for country-based exclusion remain in ", label,
+      ". Example ID(s): ", paste(utils::head(offending, 5L), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  message(
+    "Sanity check passed: 0 country-excluded samples in ", label,
+    " (", nrow(out), " rows)."
+  )
+}
 collapse_character <- function(values) {
   values <- unique(stats::na.omit(as_clean_character(values)))
   if (length(values) == 0) {
@@ -118,7 +157,6 @@ collapse_character <- function(values) {
   }
   values[[1]]
 }
-
 collapse_binary_any <- function(values) {
   values <- unique(stats::na.omit(as_clean_numeric(values)))
   if (length(values) == 0) {
@@ -126,7 +164,6 @@ collapse_binary_any <- function(values) {
   }
   as.integer(max(values))
 }
-
 collapse_single_numeric <- function(values) {
   values <- unique(stats::na.omit(as_clean_numeric(values)))
   if (length(values) == 0) {
@@ -137,15 +174,12 @@ collapse_single_numeric <- function(values) {
   }
   NA_integer_
 }
-
 aggregate_by_id <- function(df, id_col, char_cols = character(), binary_cols = character(),
                             single_numeric_cols = character()) {
   df[[id_col]] <- as_clean_character(df[[id_col]])
   df <- df[!is.na(df[[id_col]]), , drop = FALSE]
   split_df <- split(df, df[[id_col]], drop = TRUE)
-
   out <- data.frame(ID = names(split_df), stringsAsFactors = FALSE)
-
   for (col in char_cols) {
     out[[col]] <- vapply(split_df, function(part) collapse_character(part[[col]]), character(1))
   }
@@ -155,10 +189,8 @@ aggregate_by_id <- function(df, id_col, char_cols = character(), binary_cols = c
   for (col in single_numeric_cols) {
     out[[col]] <- vapply(split_df, function(part) collapse_single_numeric(part[[col]]), integer(1))
   }
-
   out
 }
-
 assert_columns <- function(df, cols, label) {
   missing <- setdiff(cols, names(df))
   if (length(missing) > 0) {
@@ -169,7 +201,6 @@ assert_columns <- function(df, cols, label) {
     )
   }
 }
-
 warn_unexpected_values <- function(df, cols, allowed, label) {
   for (col in cols) {
     values <- unique(stats::na.omit(as_clean_numeric(df[[col]])))
@@ -183,12 +214,10 @@ warn_unexpected_values <- function(df, cols, allowed, label) {
     }
   }
 }
-
 warn_collapsed_conflicts <- function(df, id_col, cols, label, numeric = FALSE) {
   df[[id_col]] <- as_clean_character(df[[id_col]])
   df <- df[!is.na(df[[id_col]]), , drop = FALSE]
   split_df <- split(df, df[[id_col]], drop = TRUE)
-
   for (col in cols) {
     conflict <- vapply(
       split_df,
@@ -208,34 +237,28 @@ warn_collapsed_conflicts <- function(df, id_col, cols, label, numeric = FALSE) {
     }
   }
 }
-
 collapse_numeric_by_id <- function(df, id_col, value_col) {
   df[[id_col]] <- as_clean_character(df[[id_col]])
   df <- df[!is.na(df[[id_col]]), , drop = FALSE]
   split_df <- split(df, df[[id_col]], drop = TRUE)
-
   data.frame(
     ID = names(split_df),
     value = vapply(split_df, function(part) collapse_single_numeric(part[[value_col]]), integer(1)),
     stringsAsFactors = FALSE
   )
 }
-
 plink_case_status <- function(in_study, case_control, missing_phenotype) {
   in_study <- as_clean_numeric(in_study)
   case_control <- as_clean_numeric(case_control)
-
   out <- rep.int(missing_phenotype, length(in_study))
   # A sample is included if flagged in genetics_id (GW_* = 1) OR if it has a
   # caco record — the latter handles supplementary IDs from Subj_Id_2015 that
   # are not in genetics_id but do appear in genetics_caco for this study.
   included <- (!is.na(in_study) & in_study == 1) | !is.na(case_control)
-
   out[included & !is.na(case_control) & case_control == 0] <- 1L
   out[included & !is.na(case_control) & case_control == 1] <- 2L
   as.integer(out)
 }
-
 read_subj_id_file <- function(path, id_column) {
   # Subj_Id_2015.txt: no header, comma-separated.
   # Columns (1-indexed): Country(1), Center(2), ID_short(3), Sex(4), DOB(5),
@@ -272,12 +295,10 @@ read_subj_id_file <- function(path, id_column) {
   # Keep first occurrence of each Idepic_Bio
   df[!duplicated(df$ID), , drop = FALSE]
 }
-
 study_case_control <- function(caco_raw, ids, included, study_id_col, caco_col, id_column) {
   caco_raw[[id_column]] <- as_clean_character(caco_raw[[id_column]])
   caco_raw$Proj_Acronym <- as_clean_character(caco_raw$Proj_Acronym)
   included <- as_clean_numeric(included)
-
   study_rows <- caco_raw[
     !is.na(caco_raw$Proj_Acronym) &
       caco_raw$Proj_Acronym == study_id_col &
@@ -286,7 +307,6 @@ study_case_control <- function(caco_raw, ids, included, study_id_col, caco_col, 
     drop = FALSE
   ]
   out <- rep(NA_integer_, length(ids))
-
   if (nrow(study_rows) > 0) {
     warn_collapsed_conflicts(
       study_rows,
@@ -306,10 +326,8 @@ study_case_control <- function(caco_raw, ids, included, study_id_col, caco_col, 
       )
     }
   }
-
   out
 }
-
 study_map <- base::data.frame(
   study = c(
     "Brea_01_Erneg",
@@ -388,10 +406,8 @@ study_map <- base::data.frame(
   ),
   stringsAsFactors = FALSE
 )
-
 main <- function() {
   require_namespace("haven")
-
   root <- normalizePath(file.path(dirname(script_path()), "..", ".."), mustWork = FALSE)
   default_input_dir <- file.path(root, "data", "reference", "Epic")
   defaults <- list(
@@ -411,22 +427,17 @@ main <- function() {
   if (is.na(opts$missing_phenotype)) {
     stop("Missing phenotype code must be an integer.", call. = FALSE)
   }
-
   input_dir <- normalizePath(opts$input_dir, mustWork = FALSE)
   output <- normalizePath(opts$output, mustWork = FALSE)
-
   caco_file <- file.path(input_dir, "genetics_caco.sas7bdat")
   id_file <- file.path(input_dir, "genetics_id.sas7bdat")
   sex_file <- file.path(input_dir, "genetics.sas7bdat")
-
   for (path in c(caco_file, id_file, sex_file)) {
     if (!file.exists(path)) {
       stop("Input file not found: ", path, call. = FALSE)
     }
   }
-
   subj_id_file <- normalizePath(opts$subj_id_file, mustWork = FALSE)
-
   message("==========================================")
   message(" Building EPIC Study Case Status File")
   message(" Input dir:     ", input_dir)
@@ -434,42 +445,51 @@ main <- function() {
   message(" ID column:     ", opts$id_column)
   message(" Subj_Id file:  ", subj_id_file)
   message("==========================================")
-
   caco_raw <- read_sas_df(caco_file)
   id_raw <- read_sas_df(id_file)
   sex_raw <- read_sas_df(sex_file)
-
+  excluded_countries <- c("6", "8", "B")
+  # NOTE: Country-based exclusion is intentionally NOT applied per-source here.
+  # It is applied ONCE, after aggregation and the supplementary-ID merge (see
+  # the "Country-based exclusion" block below), so that a sample flagged in any
+  # source cannot slip back in via the supplementary path or a per-ID country
+  # conflict.
   assert_columns(id_raw, c("Country", "Center", "Idepic", opts$id_column, study_map$id_col), "genetics_id.sas7bdat")
   assert_columns(sex_raw, c(opts$id_column, "Sex"), "genetics.sas7bdat")
   assert_columns(caco_raw, c(opts$id_column, "Proj_Acronym", unique(study_map$caco_col)), "genetics_caco.sas7bdat")
-
+  # ── Sanity diagnostic: how Country codes compare as strings ────────────────
+  # Confirms that the excluded codes ("6", "8", "B") match the actual values in
+  # the data once coerced to character (catches e.g. a numeric column that
+  # reads back as "6.0" instead of "6", which would silently miss exclusions).
+  message("Country code distribution in genetics_id.sas7bdat (string form):")
+  print(table(trimws(as_clean_character(id_raw$Country)), useNA = "ifany"))
+  message("Excluded country codes: ", paste(excluded_countries, collapse = ", "))
   warn_unexpected_values(id_raw, study_map$id_col, c(0, 1), "genetics_id.sas7bdat")
   warn_unexpected_values(caco_raw, unique(study_map$caco_col), c(0, 1), "genetics_caco.sas7bdat")
   warn_unexpected_values(sex_raw, "Sex", c(1, 2), "genetics.sas7bdat")
   warn_collapsed_conflicts(id_raw, opts$id_column, c("Country", "Center", "Idepic"), "genetics_id.sas7bdat")
   warn_collapsed_conflicts(sex_raw, opts$id_column, "Sex", "genetics.sas7bdat", numeric = TRUE)
-
   id_agg <- aggregate_by_id(
     id_raw,
     opts$id_column,
     char_cols = c("Country", "Center", "Idepic"),
     binary_cols = study_map$id_col
   )
-
   sex_agg <- aggregate_by_id(
     sex_raw,
     opts$id_column,
     single_numeric_cols = "Sex"
   )
-
   # ── Supplementary IDs from Subj_Id_2015.txt ────────────────────────────────
   subj_df <- NULL
   if (file.exists(subj_id_file)) {
     message("Reading supplementary IDs from: ", subj_id_file)
     subj_df <- read_subj_id_file(subj_id_file, opts$id_column)
     if (!is.null(subj_df)) {
+      # Not filtered here: country exclusion is applied once, post-merge. The
+      # subj_df Country column still feeds that single exclusion as evidence.
       new_ids <- subj_df$ID[!subj_df$ID %in% id_agg$ID]
-      message("  IDs in Subj_Id_2015:          ", nrow(subj_df))
+      message("  IDs in Subj_Id_2015 (pre country-exclusion): ", nrow(subj_df))
       message("  Already in genetics_id:        ", nrow(subj_df) - length(new_ids))
       message("  Supplementary IDs to add:      ", length(new_ids))
       if (length(new_ids) > 0) {
@@ -491,19 +511,15 @@ main <- function() {
   } else {
     message("Subj_Id_2015 file not found (", subj_id_file, "); skipping supplementary IDs.")
   }
-
   # ── Sex: genetics.sas7bdat primary, Subj_Id_2015 fallback ─────────────────
   sex_match <- match(id_agg$ID, sex_agg$ID)
   sex <- sex_agg$Sex[sex_match]
-
   if (!is.null(subj_df)) {
     subj_sex_lookup <- stats::setNames(subj_df$Sex, subj_df$ID)
     fallback_mask <- (is.na(sex) | !(sex %in% c(1L, 2L))) & id_agg$ID %in% names(subj_sex_lookup)
     sex[fallback_mask] <- subj_sex_lookup[id_agg$ID[fallback_mask]]
   }
-
   sex[is.na(sex) | !(sex %in% c(1L, 2L))] <- 0L
-
   out <- data.frame(
     ID = id_agg$ID,
     country = id_agg$Country,
@@ -511,17 +527,67 @@ main <- function() {
     sex = as.integer(sex),
     stringsAsFactors = FALSE
   )
-
+  # ── Country-based exclusion (single point, post-merge) ─────────────────────
+  # Collect every ID that carries an excluded Country in ANY source, then drop
+  # it from BOTH id_agg and out (kept row-aligned) so that the per-study
+  # counts and the written file reflect the exclusion. This is the only place
+  # country exclusion happens, and it closes the leaks identified earlier:
+  #   * supplementary re-admission (excluded in genetics_id, re-added via
+  #     Subj_Id_2015 with a different/blank country),
+  #   * within-ID country conflict resolved toward inclusion by the collapse,
+  #   * a flag present only in caco/genetics but not genetics_id.
+  excluded_id_set <- country_excluded_id_set(
+    list(
+      data.frame(ID = caco_raw[[opts$id_column]], Country = caco_raw[["Country"]],
+                 stringsAsFactors = FALSE),
+      data.frame(ID = id_raw[[opts$id_column]],   Country = id_raw[["Country"]],
+                 stringsAsFactors = FALSE),
+      data.frame(ID = sex_raw[[opts$id_column]],  Country = sex_raw[["Country"]],
+                 stringsAsFactors = FALSE),
+      if (!is.null(subj_df)) {
+        data.frame(ID = subj_df$ID, Country = subj_df$Country,
+                   stringsAsFactors = FALSE)
+      } else {
+        NULL
+      }
+    ),
+    excluded_countries
+  )
+  # Write the comprehensive country-exclusion ID list (flagged in ANY source)
+  # alongside the case-status file. Stage 1 reads this as EPIC_country_excluded.txt
+  # and removes any genotype sample whose EPIC ID appears here, so the exclusion
+  # carries through to the pipeline output.
+  excluded_list_path <- file.path(dirname(output), "EPIC_country_excluded.txt")
+  writeLines(excluded_id_set, excluded_list_path)
+  message(
+    "Wrote ", length(excluded_id_set), " country-excluded ID(s) to: ",
+    excluded_list_path
+  )
+  final_country <- trimws(as_clean_character(out$country))
+  exclude_mask <- (out$ID %in% excluded_id_set) |
+    (!is.na(final_country) & final_country %in% excluded_countries)
+  n_excluded <- sum(exclude_mask)
+  if (n_excluded > 0) {
+    message(
+      "Country-based exclusion: removing ", n_excluded,
+      " sample(s) flagged in any source (Country in ",
+      paste(excluded_countries, collapse = ", "), ")."
+    )
+  } else {
+    message("Country-based exclusion: no samples flagged.")
+  }
+  id_agg <- id_agg[!exclude_mask, , drop = FALSE]
+  out <- out[!exclude_mask, , drop = FALSE]
+  # Sanity check: abort if any flagged sample survived into the output.
+  assert_no_excluded_countries(out, excluded_id_set, excluded_countries)
   summary_rows <- vector("list", nrow(study_map))
   for (i in seq_len(nrow(study_map))) {
     study <- study_map$study[[i]]
     id_col <- study_map$id_col[[i]]
     caco_col <- study_map$caco_col[[i]]
-
     included <- id_agg[[id_col]]
     case_control <- study_case_control(caco_raw, id_agg$ID, included, id_col, caco_col, opts$id_column)
     out[[study]] <- plink_case_status(included, case_control, opts$missing_phenotype)
-
     summary_rows[[i]] <- data.frame(
       study = study,
       included = sum(!is.na(included) & included == 1),
@@ -531,17 +597,13 @@ main <- function() {
       stringsAsFactors = FALSE
     )
   }
-
   order_idx <- order(out$country, out$centre, out$ID, na.last = TRUE)
   out <- out[order_idx, , drop = FALSE]
-
   output_dir <- dirname(output)
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
-
   write.table(out, output, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-
   summary_df <- do.call(rbind, summary_rows)
   message("Rows written: ", nrow(out))
   message("Study columns: ", nrow(study_map))
@@ -549,7 +611,6 @@ main <- function() {
   print(summary_df, row.names = FALSE)
   message("Done.")
 }
-
 if (sys.nframe() == 0) {
   main()
 }

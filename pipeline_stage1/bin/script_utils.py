@@ -171,6 +171,29 @@ def _load_epic_sample_metadata(metadata_path: Path, study_column: str) -> dict[s
     return metadata
 
 
+def _load_country_excluded_ids(data_root: Path) -> set[str]:
+    """Return the set of EPIC IDs flagged for country-based exclusion.
+
+    Read from ``EPIC_country_excluded.txt`` (one ID per line), written by
+    ``src/misc/003_data-epic.R`` alongside ``EPIC_study_case_status.txt``. IDs
+    are normalised with the same suffix-stripping used for metadata lookup so
+    that suffixed FAM IIDs match. A missing file yields an empty set (country
+    exclusion is then a no-op) — callers that require enforcement should ensure
+    003 has been run for the current reference data.
+    """
+    try:
+        path = resolve_epic_reference_file(data_root, "EPIC_country_excluded.txt")
+    except FileNotFoundError:
+        return set()
+    excluded: set[str] = set()
+    with path.open() as handle:
+        for line in handle:
+            token = line.strip()
+            if token and not token.startswith("#") and token != "ID":
+                excluded.add(_base_epic_sample_id(token.split()[0]))
+    return excluded
+
+
 def apply_epic_sample_metadata(
     source_prefix: Path,
     output_prefix: Path,
@@ -182,6 +205,7 @@ def apply_epic_sample_metadata(
     study_column = STUDY_METADATA_COLUMNS.get(study_id, study_id)
     metadata_path = resolve_epic_reference_file(data_root, "EPIC_study_case_status.txt")
     metadata = _load_epic_sample_metadata(metadata_path, study_column)
+    excluded_ids = _load_country_excluded_ids(data_root)
 
     source_fam = source_prefix.with_suffix(".fam")
     output_fam = output_prefix.with_suffix(".fam")
@@ -192,6 +216,7 @@ def apply_epic_sample_metadata(
     pheno_counts = {"-9": 0, "1": 0, "2": 0}
     unmatched: list[str] = []
     unmatched_rows: list[tuple[str, str, str]] = []
+    country_excluded_rows: list[tuple[str, str]] = []
 
     with source_fam.open() as src, output_fam.open("w") as dst:
         for line_number, line in enumerate(src, start=1):
@@ -200,6 +225,8 @@ def apply_epic_sample_metadata(
                 raise ValueError(f"Malformed FAM row in {source_fam}:{line_number}")
 
             lookup_id = _base_epic_sample_id(fields[1])
+            if excluded_ids and lookup_id in excluded_ids:
+                country_excluded_rows.append((fields[0], fields[1]))
             if lookup_id not in metadata:
                 unmatched.append(fields[1])
                 unmatched_rows.append((fields[0], fields[1], lookup_id))
@@ -254,6 +281,62 @@ def apply_epic_sample_metadata(
             (
                 f"Unmatched sample audit file: {unmatched_path}\n"
                 "Unmatched samples were retained with PLINK-missing sex=0 and phenotype=-9.\n\n"
+            ),
+            "a",
+        )
+
+    # ── Country-based exclusion ────────────────────────────────────────────────
+    # Drop samples whose EPIC ID is in EPIC_country_excluded.txt (Country in
+    # 6, 8, B). The annotated FAM and bed/bim are already written above; rebuild
+    # the fileset with `plink --remove` so .bed/.bim/.fam stay consistent (a row
+    # cannot simply be omitted from the FAM without desyncing the genotypes).
+    if country_excluded_rows:
+        excluded_n = len(country_excluded_rows)
+        # Safety backstop: refuse to nuke a study if a malformed exclusion list
+        # matches nearly everyone (e.g. an all-IDs file or a column mix-up).
+        if sample_count > 0 and excluded_n > 0.95 * sample_count:
+            raise ValueError(
+                f"Country-based exclusion would remove {excluded_n}/{sample_count} "
+                f"samples (>95%) for study {study_id}; refusing as a likely bad "
+                f"EPIC_country_excluded.txt in {metadata_path.parent}."
+            )
+        plink = os.environ.get("PLINK_BIN")
+        if not plink:
+            raise RuntimeError(
+                "PLINK_BIN is not set; call configure_plink() before "
+                "apply_epic_sample_metadata() so country-excluded samples can be removed."
+            )
+        remove_path = output_prefix.with_name(f"{output_prefix.name}_country_excluded.id")
+        with remove_path.open("w") as handle:
+            for fid, iid in country_excluded_rows:
+                handle.write(f"{fid}\t{iid}\n")
+        tmp_prefix = output_prefix.with_name(f"{output_prefix.name}_country_kept")
+        cmd = (
+            f"{q(plink)} --bfile {q(output_prefix)} --remove {q(remove_path)} "
+            f"--make-bed --out {q(tmp_prefix)}"
+        )
+        # Run with cwd set to the output directory so the containerised plink
+        # (singularity auto-mounts $PWD) can write its outputs to the scratch
+        # Trace dir — matching how every other plink call in the study scripts
+        # is invoked via run(cmd, study_dir).
+        run(cmd, output_prefix.parent)
+        for ext in ("bed", "bim", "fam"):
+            shutil.move(
+                str(tmp_prefix.with_suffix(f".{ext}")),
+                str(output_prefix.with_suffix(f".{ext}")),
+            )
+        tmp_log = tmp_prefix.with_suffix(".log")
+        if tmp_log.exists():
+            tmp_log.unlink()
+        write_summary(
+            summary,
+            (
+                "\n*********************** Country-Based Exclusion *******************************\n\n"
+                f"Excluded countries: 6, 8, B (list: EPIC_country_excluded.txt)\n"
+                f"Samples removed: {excluded_n}\n"
+                f"Samples remaining: {sample_count - excluded_n}\n"
+                f"Remove list: {remove_path}\n\n"
+                "**********************************************************\n\n"
             ),
             "a",
         )
