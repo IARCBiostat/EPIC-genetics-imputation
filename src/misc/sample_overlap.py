@@ -291,8 +291,26 @@ def generate_upset_plot(
     if len(sizes_desc) > max_intersections:
         effective_min = max(effective_min, sizes_desc[max_intersections - 1])
 
+    # Never drop a study entirely: every study must keep at least its singleton
+    # (unique-sample) column. Each study's unique count is the size of its
+    # single-study combo; cap the threshold at the smallest of these so the
+    # `max_intersections` rule can't push it above a small study's singleton.
+    singleton_sizes = [
+        combo_counts[frozenset([s])]
+        for s in study_order
+        if frozenset([s]) in combo_counts
+    ]
+    if singleton_sizes:
+        effective_min = min(effective_min, min(singleton_sizes))
+
     # --- Figure ---
-    fig = plt.figure(figsize=(20, 11))
+    # Size the canvas to the content: width scales with the number of displayed
+    # intersection columns, height with the number of study rows. A fixed width
+    # clips the matrix/bars once there are many columns, so compute it instead.
+    n_cols = sum(1 for v in combo_counts.values() if v >= effective_min)
+    fig_w = max(36.0, 1.6 * n_cols + 14.0)
+    fig_h = max(12.0, 0.55 * len(study_order) + 5.0)
+    fig = plt.figure(figsize=(fig_w, fig_h))
     upset = UpSet(
         data,
         subset_size="sum",
@@ -317,18 +335,27 @@ def generate_upset_plot(
     ax_inter.set_ylabel("Intersection size", fontsize=9)
     ax_inter.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
 
-    total_unique = compute_unique_count(study_samples)
-    fig.suptitle(
-        f"EPIC Genetics — Sample Overlap Across {len(studies)} Studies  "
-        f"({total_unique:,} unique participants)",
-        fontsize=12,
-        y=1.01,
+    # Caption (bottom-left): note that the figure is simplified — intersections
+    # smaller than the display threshold are not drawn.
+    fig.text(
+        0.01, 0.01,
+        f"simplified figure; intersections <{int(effective_min)} excluded",
+        ha="left", va="bottom", fontsize=9, style="italic", color="#666666",
     )
 
+    # Choose a DPI that keeps the rendered image within matplotlib's hard
+    # 65,536-px-per-dimension limit, so requesting "show every intersection"
+    # (a very wide canvas) cannot crash the save.
+    dpi = 150
+    max_px = 60000
+    longest_in = max(fig_w, fig_h)
+    if longest_in * dpi > max_px:
+        dpi = max(50, int(max_px / longest_in))
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-    print(f"UpSet plot saved to:            {output_path}")
+    print(f"UpSet plot saved to:            {output_path}  ({fig_w:.0f}x{fig_h:.0f} in @ {dpi} dpi)")
 
 
 # ---------------------------------------------------------------------------
