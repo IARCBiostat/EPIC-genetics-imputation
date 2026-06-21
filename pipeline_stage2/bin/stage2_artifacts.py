@@ -328,15 +328,35 @@ def _load_or_build_r2_table(analysis_root: Path, study: str) -> Path | None:
 
     staged_tables = _stage2_imputation_variant_tables(analysis_root, study)
     frames = [pd.read_csv(path, sep="\t") for path in staged_tables if path.stat().st_size]
-    if frames:
-        frame = pd.concat(frames, ignore_index=True)
-        frame.to_csv(output_path, sep="\t", index=False)
-        return output_path
+    if not frames:
+        if output_path.exists() and ACTIVE_CHROMS is None:
+            return output_path
+        return None
 
-    if output_path.exists() and ACTIVE_CHROMS is None:
-        return output_path
+    frame = pd.concat(frames, ignore_index=True)
 
-    return None
+    # The persisted aggregate must never *shrink*. It can become partial two ways:
+    #   - a chromosome-restricted run (--chromosomes 22) stages only that subset;
+    #   - an "all" run that builds before every chr*.r2_maf.tsv is on disk (e.g. a
+    #     partial Nextflow group) stages an incomplete set.
+    # In both cases, writing only the staged rows would clobber a previously
+    # complete r2_by_variant.tsv and leave downstream figures (notably the
+    # R2-by-chromosome violin) showing only those chromosomes. Preserve rows for
+    # any chromosome already in the aggregate that is absent from the newly staged
+    # set, so the aggregate can only ever grow and figures never regress.
+    if output_path.exists() and output_path.stat().st_size and "chrom" in frame.columns:
+        try:
+            existing = pd.read_csv(output_path, sep="\t")
+        except (pd.errors.EmptyDataError, OSError):
+            existing = None
+        if existing is not None and "chrom" in existing.columns:
+            staged_chroms = set(frame["chrom"].map(_normalise_chrom))
+            preserved = existing[~existing["chrom"].map(_normalise_chrom).isin(staged_chroms)]
+            if not preserved.empty:
+                frame = pd.concat([preserved, frame], ignore_index=True)
+
+    frame.to_csv(output_path, sep="\t", index=False)
+    return output_path
 
 
 def _load_or_build_empirical_table(analysis_root: Path, study: str) -> Path | None:

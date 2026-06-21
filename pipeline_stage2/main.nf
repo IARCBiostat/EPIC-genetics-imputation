@@ -142,12 +142,18 @@ workflow {
     }
 
     if (params.run_reporting) {
-        // Each study sends 1 tuple per chromosome from imputation metrics,
-        // plus 1 tuple per chromosome from empirical validation if enabled.
-        def expected_per_study = selected_chroms.size() * (run_empirical_validation ? 2 : 1)
-        
+        // Group every per-chromosome metrics/validation tuple by study. We do NOT
+        // use `size`/`remainder` here: the per-study item count is not fixed (e.g.
+        // studies without chrX emit fewer tuples), so a `size`-based group would
+        // never complete for them and `remainder` would release a *partial* group
+        // early. A partial group makes REPORTING build an incomplete
+        // r2_by_variant.tsv (the chr22-only bug), which then sticks once REPORTING
+        // is cached. Plain groupTuple(by: 0) waits for the channel to drain and
+        // emits each study's complete set exactly once — correct regardless of how
+        // many chromosomes a study has. (Trades a little per-study pipelining for
+        // guaranteed-complete reports.)
         ch_reporting_inputs
-            .groupTuple(by: 0, size: expected_per_study, remainder: true)
+            .groupTuple(by: 0)
             .map { study, metrics, summaries -> tuple(study, metrics + summaries) }
             .set { ch_reporting_grouped }
 
