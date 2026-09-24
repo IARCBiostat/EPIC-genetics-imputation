@@ -352,7 +352,7 @@ analysis requires (e.g. `plink2 --pmerge-list`).
 - `conda` (Miniconda or Miniforge) initialised in the shell you submit jobs from
 - Apptainer available on the compute nodes
 - internet access from the compute nodes: tools and reference data are downloaded, and Nextflow builds its per-process conda environments on first use
-- read access to the raw EPIC genetics archive (`GENETICS_DATA_SOURCE_ROOT`), including `Central_Genetics/*.sas7bdat` and `Reference/Epic/Subj_Id_2015.txt`
+- read access to the EPIC GWAS raw data (`GENETICS_SOURCE_ROOT`): `1_Raw_Data/data/` (study genotypes and chip manifests), `1_Raw_Data/Reference/Epic/Subj_Id_2015.txt`, and `Central_Genetics/*.sas7bdat`
 - space for the input data: by default steps 2–3 copy the raw genotypes and download the reference panel and dbSNP (tens of GB) into `data/` inside the clone, so clone onto a large project filesystem (not a quota-limited home directory), or point `DATA_ROOT` and `TOOLS_DIR` in `.env` elsewhere
 
 Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`.
@@ -369,7 +369,7 @@ The repository ships a `.env` with placeholder values. Edit the lines marked `ED
 | Variable | Set to |
 | --- | --- |
 | `GENETICS_PROJECT_ROOT` | absolute path of this cloned repository: exactly the output of `pwd` above, with nothing appended |
-| `GENETICS_DATA_SOURCE_ROOT` | the raw EPIC genetics archive: the folder that directly contains `Reference/Epic/`, `Central_Genetics/` and the study folders (`Breast/`, `Colonrectum/`, `Epic_Cvd/`, …) |
+| `GENETICS_SOURCE_ROOT` | the EPIC GWAS folder holding the raw data: the folder that contains `1_Raw_Data/` and `Central_Genetics/` (layout below) |
 | `APPTAINER_BINDPATH` | host paths Apptainer must mount, as comma-separated `host:container` pairs covering the data, tools and scratch areas |
 | `SCRATCH` | scratch area for outputs and Nextflow work directories |
 | `SCRATCH_DATE` | a label for this run, e.g. `2026-09-24` |
@@ -405,13 +405,27 @@ Check that `src/logs/000_tools.out` ends with `ALL TOOLS VERIFIED SUCCESSFULLY` 
 
 ### 2: prepare study data
 
-We create a copy of all required EPIC genetics data files in `${DATA_ROOT}/genetics`, and the EPIC reference files in `${DATA_ROOT}/reference/Epic`:
+We create a copy of all required EPIC genetics data files in `${DATA_ROOT}/genetics`, and the EPIC reference files in `${DATA_ROOT}/reference/Epic`. The script reads from three locations under `GENETICS_SOURCE_ROOT`:
+
+```
+${GENETICS_SOURCE_ROOT}/
+├── 1_Raw_Data/
+│   ├── data/                  # GENETICS_DATA_SOURCE_ROOT: study folders, e.g. Breast/Brea_01_Erneg/{Data_Received,Chip_files}/
+│   └── Reference/Epic/        # EPIC_REF_SOURCE_DIR: Subj_Id_2015.txt
+└── Central_Genetics/          # CENTRAL_GENETICS_DIR: genetics.sas7bdat, genetics_caco.sas7bdat, genetics_id.sas7bdat
+```
+
+If one of them lives elsewhere, set that variable in `.env` directly. First check `.env` and every source path. This takes a few seconds and copies nothing:
+
+```bash
+bash src/001_data-genetics.sh --check
+```
+
+It confirms `GENETICS_PROJECT_ROOT` is this repository and lists any missing folder or file. When it reports `All 53 source paths found`, submit the copy (which repeats the check first, reporting to `src/logs/001_data_genetics.err`):
 
 ```bash
 sbatch src/001_data-genetics.sh
 ```
-
-Before copying anything, the script checks that `GENETICS_PROJECT_ROOT` is this repository and that every expected folder and file exists under `GENETICS_DATA_SOURCE_ROOT`. If a check fails, it lists what is wrong in `src/logs/001_data_genetics.err`.
 
 ### 3: download reference data
 
