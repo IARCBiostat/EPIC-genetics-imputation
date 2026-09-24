@@ -35,9 +35,11 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-# Source locations (see .env). The fallbacks cover a single archive that holds
-# Reference/Epic/ and Central_Genetics/ next to the study folders.
+# Source locations and layout (see .env). The fallbacks cover an older .env that
+# points GENETICS_DATA_SOURCE_ROOT at the original delivery archive, which holds
+# Reference/Epic/ and Central_Genetics/ next to the category folders.
 SOURCE_ROOT="${GENETICS_DATA_SOURCE_ROOT}"
+SOURCE_LAYOUT="${GENETICS_SOURCE_LAYOUT:-archive}"
 EPIC_REF_SOURCE_DIR="${EPIC_REF_SOURCE_DIR:-${SOURCE_ROOT}/Reference/Epic}"
 CENTRAL_GENETICS_DIR="${CENTRAL_GENETICS_DIR:-${SOURCE_ROOT}/Central_Genetics}"
 DEST_ROOT="${DATA_ROOT}/genetics"
@@ -45,7 +47,7 @@ EPIC_REF_DEST_ROOT="${REF_DIR}/Epic"
 
 echo "=========================================="
 echo " Source locations"
-echo " Study data:        ${SOURCE_ROOT}"
+echo " Study data:        ${SOURCE_ROOT} (layout: ${SOURCE_LAYOUT})"
 echo " EPIC ID reference: ${EPIC_REF_SOURCE_DIR}"
 echo " Central genetics:  ${CENTRAL_GENETICS_DIR}"
 echo "=========================================="
@@ -63,6 +65,10 @@ done
 if [ "${SOURCE_UNSET:-0}" -eq 1 ]; then
   echo "       Set GENETICS_SOURCE_ROOT (or the individual source paths) in .env." >&2
 fi
+if [ "$SOURCE_LAYOUT" != flat ] && [ "$SOURCE_LAYOUT" != archive ]; then
+  echo "ERROR: GENETICS_SOURCE_LAYOUT must be 'flat' or 'archive' (got '${SOURCE_LAYOUT}')." >&2
+  ENV_ERRORS=1
+fi
 REPO_DIR="$(cd "$(dirname "$ENV_FILE")" && pwd -P)"
 if [ "$(cd "$PROJ_ROOT" 2>/dev/null && pwd -P || true)" != "$REPO_DIR" ]; then
   echo "ERROR: GENETICS_PROJECT_ROOT must be this repository's directory." >&2
@@ -75,7 +81,12 @@ fi
 # ── Study Definition Mapping ──────────────────────────────────────────────────
 # Format:
 # "StudyFolderName"|"StudySubPath"|"DataFolderName"|"ChipFolderName"|"ExtraPlinkPrefix"|"ExtraPlinkDest"|"ExtraFilePath"|"ExtraFileDest"
-# Optional overrides:
+# StudyFolderName is the folder written under ${DATA_ROOT}/genetics/ (and read by the
+# stage-1 scripts). With the "flat" layout the source already holds one such folder
+# per study, so only StudyFolderName and the *Dest/*FolderName fields are used (to
+# check its contents). With the "archive" layout the remaining fields say where each
+# piece lives in the original delivery archive:
+#   StudySubPath: study folder relative to SOURCE_ROOT
 #   DataFolderName: defaults to Data_Received, use "." for flat sync
 #   ChipFolderName: defaults to Chip_files, use "." to skip chip sync
 #   ExtraPlinkPrefix: source prefix relative to SOURCE_ROOT, synced as .bed/.bim/.fam
@@ -134,19 +145,30 @@ require file "${CENTRAL_GENETICS_DIR}/genetics_id.sas7bdat"
 require file "${CENTRAL_GENETICS_DIR}/genetics.sas7bdat"
 for entry in "${STUDIES[@]}"; do
     parse_study_entry "$entry"
-    if [ "$DATA_FLD" != "." ]; then require dir "${SOURCE_ROOT}/${SUB_PATH}/${DATA_FLD}"; else require dir "${SOURCE_ROOT}/${SUB_PATH}"; fi
-    if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then require dir "${SOURCE_ROOT}/${SUB_PATH}/${CHIP_FLD}"; fi
-    if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
-        for ext in bed bim fam; do require file "${SOURCE_ROOT}/${EXTRA_PLINK_PREFIX}.${ext}"; done
+    if [ "$SOURCE_LAYOUT" = flat ]; then
+        # The study folder must already hold what the archive sync would produce.
+        base="${SOURCE_ROOT}/${STUDY_NAME}"
+        if [ "$DATA_FLD" != "." ]; then require dir "${base}/${DATA_FLD}"; else require dir "${base}"; fi
+        if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then require dir "${base}/${CHIP_FLD}"; fi
+        if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
+            for ext in bed bim fam; do require file "${base}/${EXTRA_PLINK_DEST}/$(basename "${EXTRA_PLINK_PREFIX}").${ext}"; done
+        fi
+        if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then require file "${base}/${EXTRA_FILE_DEST}"; fi
+    else
+        if [ "$DATA_FLD" != "." ]; then require dir "${SOURCE_ROOT}/${SUB_PATH}/${DATA_FLD}"; else require dir "${SOURCE_ROOT}/${SUB_PATH}"; fi
+        if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then require dir "${SOURCE_ROOT}/${SUB_PATH}/${CHIP_FLD}"; fi
+        if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
+            for ext in bed bim fam; do require file "${SOURCE_ROOT}/${EXTRA_PLINK_PREFIX}.${ext}"; done
+        fi
+        if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then require file "${SOURCE_ROOT}/${EXTRA_FILE_PATH}"; fi
     fi
-    if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then require file "${SOURCE_ROOT}/${EXTRA_FILE_PATH}"; fi
 done
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
     echo "ERROR: ${#MISSING[@]} of ${N_CHECKED} expected source path(s) are missing:" >&2
     printf '         %s\n' "${MISSING[@]}" >&2
-    echo "       Check the source settings in .env (GENETICS_SOURCE_ROOT and the three" >&2
-    echo "       locations derived from it) against the layout described there." >&2
+    echo "       Check the source settings in .env (GENETICS_SOURCE_ROOT, the three" >&2
+    echo "       locations derived from it, and GENETICS_SOURCE_LAYOUT)." >&2
     exit 1
 fi
 echo "All ${N_CHECKED} source paths found."
@@ -178,6 +200,12 @@ for entry in "${STUDIES[@]}"; do
     # Create target paths
     TGT_DIR="${DEST_ROOT}/${STUDY_NAME}"
     mkdir -p "$TGT_DIR"
+
+    # Flat layout: the source study folder is already in pipeline form; copy it whole.
+    if [ "$SOURCE_LAYOUT" = flat ]; then
+        rsync -avP "${SOURCE_ROOT}/${STUDY_NAME}/" "${TGT_DIR}/"
+        continue
+    fi
 
     # 1. Sync Data folder
     if [ "$DATA_FLD" != "." ]; then

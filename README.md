@@ -410,12 +410,12 @@ We create a copy of all required EPIC genetics data files in `${DATA_ROOT}/genet
 ```
 ${GENETICS_SOURCE_ROOT}/
 ├── 1_Raw_Data/
-│   ├── data/                  # GENETICS_DATA_SOURCE_ROOT: study folders, e.g. Breast/Brea_01_Erneg/{Data_Received,Chip_files}/
+│   ├── data/                  # GENETICS_DATA_SOURCE_ROOT: one folder per study, e.g. Brea_01_Erneg/{Data_Received,Chip_files}/
 │   └── Reference/Epic/        # EPIC_REF_SOURCE_DIR: Subj_Id_2015.txt
 └── Central_Genetics/          # CENTRAL_GENETICS_DIR: genetics.sas7bdat, genetics_caco.sas7bdat, genetics_id.sas7bdat
 ```
 
-If one of them lives elsewhere, set that variable in `.env` directly. First check `.env` and every source path. This takes a few seconds and copies nothing:
+Each study folder in `1_Raw_Data/data/` is already in the form stage 1 reads, so it is copied as is (`GENETICS_SOURCE_LAYOUT="flat"`, the default). To rebuild the study folders from the original delivery archive instead (`Breast/Brea_01_Erneg/`, …, plus `Extraction/`), point `GENETICS_DATA_SOURCE_ROOT` at that archive and set `GENETICS_SOURCE_LAYOUT="archive"`. If any of the three locations lives elsewhere, set that variable in `.env` directly. First check `.env` and every source path. This takes a few seconds and copies nothing:
 
 ```bash
 bash src/001_data-genetics.sh --check
