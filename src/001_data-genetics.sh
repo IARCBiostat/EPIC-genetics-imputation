@@ -56,7 +56,7 @@ echo "=========================================="
 ENV_ERRORS=0
 for var in GENETICS_PROJECT_ROOT GENETICS_DATA_SOURCE_ROOT EPIC_REF_SOURCE_DIR CENTRAL_GENETICS_DIR; do
   val="${!var:-}"
-  if [ -z "$val" ] || [[ "$val" == /CHANGE* ]]; then
+  if [ -z "$val" ] || [[ "$val" == /CHANGE* || "$val" == /WHERE/* ]]; then
     echo "ERROR: ${var} is unset or still a placeholder ('${val}')." >&2
     ENV_ERRORS=1
     [ "$var" = GENETICS_PROJECT_ROOT ] || SOURCE_UNSET=1

@@ -364,22 +364,22 @@ git clone https://github.com/IARCBiostat/EPIC-genetics-imputation.git
 cd EPIC-genetics-imputation
 ```
 
-The repository ships a `.env` with placeholder values. Edit the lines marked `EDIT` (the `/CHANGE` paths and `SCRATCH_DATE`); everything else derives from them:
+The repository ships a `.env` with placeholder values. Edit the three values under `# Change these` at the top; everything else derives from them:
 
 | Variable | Set to |
 | --- | --- |
 | `GENETICS_PROJECT_ROOT` | absolute path of this cloned repository: exactly the output of `pwd` above, with nothing appended |
 | `GENETICS_SOURCE_ROOT` | the EPIC GWAS folder holding the raw data: the folder that contains `1_Raw_Data/` and `Central_Genetics/` (layout below) |
-| `APPTAINER_BINDPATH` | host paths Apptainer must mount, as comma-separated `host:container` pairs covering the data, tools and scratch areas |
-| `SCRATCH` | scratch area for outputs and Nextflow work directories |
 | `SCRATCH_DATE` | a label for this run, e.g. `2026-09-24` |
+
+Two site defaults sit just below: `APPTAINER_BINDPATH="/data:/data"` (host paths Apptainer mounts) and `SCRATCH="/scratch/${USER}/epic-genetics"` (where outputs and Nextflow work directories go). Change them only if your cluster differs.
 
 To update the pipeline later, just run `git pull`: it never changes your edited `.env`, because the repository copy of `.env` is kept fixed. (Maintainers: never commit changes to `.env`. Give any new setting a default in the scripts instead, and don't commit your own edited `.env`.)
 
 By default, tools are installed to `${GENETICS_PROJECT_ROOT}/tools`, and input data are copied/downloaded to `${GENETICS_PROJECT_ROOT}/data`, with reference data in `data/reference`. `TOOLS_DIR` and `DATA_ROOT` can point elsewhere. Keep `REF_DIR` at `${DATA_ROOT}/reference`, because stage 1 reads the EPIC reference files from there.
 
 > **Important — set `SCRATCH_DATE` before running.**
-> All pipeline stages write their outputs under `${SCRATCH}/${SCRATCH_DATE}/`. You must set `SCRATCH_DATE` to a date string (e.g. `2026-05-28`) in `.env` before submitting any stage, and keep it the same value for the entire analysis run. If you start a fresh analysis, update `SCRATCH_DATE` to a new date so the new run writes to a separate directory. The repository's `.env` ships with `SCRATCH_DATE="CHANGE-ME"` as a deliberate placeholder.
+> All pipeline stages write their outputs under `${SCRATCH}/${SCRATCH_DATE}/`. You must set `SCRATCH_DATE` to a date string (e.g. `2026-05-28`) in `.env` before submitting any stage, and keep it the same value for the entire analysis run. If you start a fresh analysis, update `SCRATCH_DATE` to a new date so the new run writes to a separate directory. The repository's `.env` ships with `SCRATCH_DATE="YEAR-MONTH-DAY"` as a deliberate placeholder.
 
 ### 1: install environments and tools
 

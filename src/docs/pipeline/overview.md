@@ -27,7 +27,7 @@ The EPIC genetics pipeline runs in four sequential stages, each submitted as a S
 
 ### 1. Configure the environment
 
-Edit the lines marked `EDIT` in the repository's `.env` (repository path, raw data archive, Apptainer bind paths, scratch area, and `SCRATCH_DATE`, your run label, e.g. `2025-06`). All outputs will be written to `${SCRATCH}/${SCRATCH_DATE}/`. Run every command from the repository root.
+Edit the three values under `# Change these` at the top of the repository's `.env` (repository path, raw data folder, and `SCRATCH_DATE`, your run label, e.g. `2025-06`). All outputs will be written to `${SCRATCH}/${SCRATCH_DATE}/`. Run every command from the repository root.
 
 ```bash
 bash src/000_env.sh      # create the nf_EPIC-genetics and Python 2.7 conda environments
