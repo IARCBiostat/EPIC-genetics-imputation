@@ -118,6 +118,12 @@ if [[ "${PLINK_BIN}" == */* ]]; then
   export PATH="$(dirname -- "${PLINK_BIN}"):${PATH}"
 fi
 export PLINK_BIN
+# Use the pinned plink2 installed by 000_tools.sh by absolute path, so no other plink2
+# on PATH (conda base, system, modules) can shadow it in the Slurm tasks.
+PLINK2_BIN="${PLINK2_BIN:-plink2}"
+if [ "${PLINK2_BIN}" = "plink2" ] && [ -x "${GENETICS_TOOLS_BIN:-}/plink2" ]; then
+  PLINK2_BIN="${GENETICS_TOOLS_BIN}/plink2"
+fi
 DATA_ROOT="$(resolve_data_root)"
 WORK_ROOT="${STAGE1_WORK_ROOT:-${SCRATCH_RUN}/stage1/work}"
 SCRIPTS_DIR="${PROJ_ROOT}/pipeline_stage1/scripts"
@@ -193,12 +199,21 @@ mkdir -p "${PROJ_ROOT}/src/logs"
 mkdir -p "${SCRATCH_RUN}/stage1"
 cd "${SCRATCH_RUN}/stage1"
 
-for cmd_name in "${PYTHON3_BIN}" "${PYTHON2_BIN}" "${PLINK_BIN}" perl nextflow; do
+for cmd_name in "${PYTHON3_BIN}" "${PYTHON2_BIN}" "${PLINK_BIN}" "${PLINK2_BIN}" perl nextflow; do
   if ! command -v "$cmd_name" >/dev/null 2>&1; then
     echo "ERROR: Required command not found in PATH: ${cmd_name}" >&2
     exit 1
   fi
 done
+
+# STAGE1_QC removes duplicates with --king-cutoff-table (plink2 builds after 24 Jun 2024);
+# check it here rather than letting every study fail at the end of stage 1.
+PLINK2_VERSION_STR="$("${PLINK2_BIN}" --version 2>/dev/null | head -1 || true)"
+if [[ "$("${PLINK2_BIN}" --king-cutoff-table 2>&1 || true)" != *"--king-cutoff-table requires"* ]]; then
+  echo "ERROR: ${PLINK2_BIN} (${PLINK2_VERSION_STR:-unknown version}) does not support --king-cutoff-table." >&2
+  echo "       Stage-1 QC needs plink2 2.0.0-a.6.9 or later; rerun sbatch src/000_tools.sh to install it." >&2
+  exit 1
+fi
 
 if [ ! -d "$SCRIPTS_DIR" ]; then
   echo "ERROR: Scripts directory not found: ${SCRIPTS_DIR}" >&2
@@ -228,6 +243,7 @@ echo "Work root:    ${WORK_ROOT}"
 echo "Python3:      ${PYTHON3_BIN}"
 echo "Python2:      ${PYTHON2_BIN}"
 echo "PLINK:        ${PLINK_BIN}"
+echo "PLINK2:       ${PLINK2_BIN} (${PLINK2_VERSION_STR})"
 echo "EPIC status:  ${EPIC_CASE_STATUS_FILE}"
 echo "Force rerun:  ${STAGE1_FORCE}"
 echo "Datasets:     ${#DATASET_SCRIPTS[@]}"

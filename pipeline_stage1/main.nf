@@ -259,10 +259,12 @@ process STAGE1_QC {
         : > king_dupes.king.cutoff.out.id
     fi
     [ -f king_dupes.king.cutoff.out.id ] || : > king_dupes.king.cutoff.out.id
-    N_DUPLICATES=\$(wc -l < king_dupes.king.cutoff.out.id | tr -d ' ')
+    # plink2 writes a '#FID IID' header even when no sample is removed; count and merge IDs only
+    grep -v '^#' king_dupes.king.cutoff.out.id > king_dupes.id || true
+    N_DUPLICATES=\$(wc -l < king_dupes.id | tr -d ' ')
 
     # --- Merge exclusion lists ---
-    cat sex_mismatch.id het_outliers.id king_dupes.king.cutoff.out.id | sort -u > samples_to_remove.id
+    cat sex_mismatch.id het_outliers.id king_dupes.id | sort -u > samples_to_remove.id
     N_REMOVED_SAMPLES=\$(wc -l < samples_to_remove.id | tr -d ' ')
 
     # --- Apply sample exclusions, HWE (autosomes), and pre-phasing MAF filter ---

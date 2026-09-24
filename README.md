@@ -395,7 +395,7 @@ Create the `nf_EPIC-genetics` conda environment (Nextflow, Java, Python 3, R) an
 bash src/000_env.sh
 ```
 
-Install the tools that run outside Nextflow's per-process conda environments. That is htslib/bcftools (compiled), plink 1.9, SHAPEIT5 and UCSC liftOver (Apptainer images), plink2 and R (conda), and [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) with its chain files. This runs as a job because compiling takes a while:
+Install the tools that run outside Nextflow's per-process conda environments. That is htslib/bcftools (compiled), plink 1.9, SHAPEIT5 and UCSC liftOver (Apptainer images), plink2 2.0.0-a.6.9 (its own conda environment in `tools/envs/plink2`; stage 1 needs this version or later), R (conda), and [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) with its chain files. This runs as a job because compiling takes a while:
 
 ```bash
 sbatch src/000_tools.sh

@@ -6,4 +6,5 @@ channels:
 dependencies:
   - python=3.11
   - plink
-  - plink2
+  # >= 2.0.0-a.6.9 for --king-cutoff-table (relatedness); pinned to the build verified with it
+  - plink2=2.0.0a.6.9

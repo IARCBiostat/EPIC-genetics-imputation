@@ -12,7 +12,7 @@
 # per-process conda environments, into ${TOOLS_DIR} (wrappers in ${TOOLS_DIR}/bin):
 #   - htslib (bgzip, tabix) and bcftools, compiled from source
 #   - plink 1.9, SHAPEIT5 and UCSC liftOver, as Apptainer images
-#   - plink2 and R, in a conda environment
+#   - plink2 (pinned, in its own conda environment) and R (conda)
 #   - triple-liftOver (stage-1 liftover to hg38), from GitHub at a pinned commit
 # Submit from the repository root: sbatch src/000_tools.sh
 
@@ -40,6 +40,18 @@ SRC_DIR="${TOOLS_DIR}/src"
 RPATH_FLAGS="-Wl,-rpath,${TOOLS_DIR}/lib -Wl,-rpath,${TOOLS_DIR}/lib64"
 RENV_NAME="renv"
 RENV_PATH="${CONDA_BASE}/envs/${RENV_NAME}"
+# plink2 gets its own pinned environment inside TOOLS_DIR: stage-1 and stage-3 QC need
+# --king-cutoff-table (added 24 Jun 2024; bioconda 2.0.0a.6.9 is built 29 Jan 2025), and
+# a shared or pre-existing env can leave an older plink2 in place.
+PLINK2_VERSION="2.0.0a.6.9"
+PLINK2_ENV="${TOOLS_DIR}/envs/plink2"
+
+# True when the given plink2 recognises --king-cutoff-table.
+plink2_has_king_cutoff_table() {
+    local out
+    out="$("$1" --king-cutoff-table 2>&1 || true)"
+    [[ "$out" == *"--king-cutoff-table requires"* ]]
+}
 CONDA_BIN="${CONDA_BASE}/bin"
 TRIPLE_LIFTOVER_DIR="${TRIPLE_LIFTOVER_DIR:-${TOOLS_DIR}/triple-liftOver}"
 
@@ -91,7 +103,7 @@ else
     echo "  ✓ bcftools (already installed)"
 fi
 
-# PLINK2 comes from bioconda (installed into the renv conda env in step 5);
+# PLINK2 comes from bioconda (its own pinned conda env, step 5);
 # remove any previously downloaded invalid .sif file.
 rm -f "${IMG_DIR}/plink2.sif"
 
@@ -143,7 +155,7 @@ EOF
 # plink2
 cat > "${BIN_DIR}/plink2" << EOF
 #!/bin/bash
-exec "${RENV_PATH}/bin/plink2" "\$@"
+exec "${PLINK2_ENV}/bin/plink2" "\$@"
 EOF
 
 # shapeit5
@@ -190,24 +202,40 @@ if [ -d "${TRIPLE_LIFTOVER_DIR}/library" ]; then
     ln -sf "${BIN_DIR}/liftOver" "${TRIPLE_LIFTOVER_DIR}/library/liftOver"
 fi
 
-# ── 5. R Packages and plink2 ──────────────────────────────────────────────────
+# ── 5. Conda environments (plink2, R) ─────────────────────────────────────────
 echo ""
-echo "[5/6] Installing R packages and plink2..."
+echo "[5/6] Installing plink2 and R packages..."
 FAILURES=0
 
-# miniconda's R Makeconf hardcodes /opt/rh/devtoolset-8 (CentOS compiler, absent on Ubuntu).
+# 5a. plink2, pinned, in its own environment (recreated if missing or too old)
+if [ -x "${PLINK2_ENV}/bin/plink2" ] && plink2_has_king_cutoff_table "${PLINK2_ENV}/bin/plink2"; then
+    echo "  ✓ plink2 (already installed: $("${PLINK2_ENV}/bin/plink2" --version | head -1))"
+else
+    echo "  Creating plink2 ${PLINK2_VERSION} environment at ${PLINK2_ENV}..."
+    mkdir -p "$(dirname "${PLINK2_ENV}")"
+    "${CONDA_BIN}/conda" create -y -p "${PLINK2_ENV}" --override-channels -c conda-forge -c bioconda \
+        "plink2=${PLINK2_VERSION}"
+    if [ -x "${PLINK2_ENV}/bin/plink2" ]; then
+        echo "  ✓ plink2 ($("${PLINK2_ENV}/bin/plink2" --version | head -1))"
+    else
+        echo "  ✗ FAILED: plink2 environment creation failed"
+        FAILURES=$((FAILURES + 1))
+    fi
+fi
+
+# 5b. R. miniconda's R Makeconf hardcodes /opt/rh/devtoolset-8 (CentOS compiler, absent on Ubuntu).
 # install.packages() compilation always fails. Fix: dedicated conda env with pre-built
 # conda-forge R packages — no compilation involved at all.
 
 if [ ! -d "${RENV_PATH}" ]; then
-    echo "  Creating conda R environment (r-base + r-haven + r-tidyverse + plink2)..."
-    "${CONDA_BIN}/conda" create -y -n "${RENV_NAME}" --override-channels -c conda-forge -c bioconda \
-        r-base r-haven r-tidyverse plink2
+    echo "  Creating conda R environment (r-base + r-haven + r-tidyverse)..."
+    "${CONDA_BIN}/conda" create -y -n "${RENV_NAME}" --override-channels -c conda-forge \
+        r-base r-haven r-tidyverse
     if [ ! -x "${RENV_PATH}/bin/Rscript" ]; then
         echo "  ✗ FAILED: conda renv creation failed"
         FAILURES=$((FAILURES + 1))
     else
-        echo "  ✓ conda renv (r-base + r-haven + r-tidyverse + plink2)"
+        echo "  ✓ conda renv (r-base + r-haven + r-tidyverse)"
     fi
 else
     if "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
@@ -221,19 +249,6 @@ else
         else
             echo "  ✓ r-haven added to renv"
         fi
-    fi
-    # Add plink2 to existing renv if not already present
-    if [ ! -x "${RENV_PATH}/bin/plink2" ]; then
-        echo "  Adding plink2 to renv..."
-        "${CONDA_BIN}/conda" install -y -n "${RENV_NAME}" --override-channels -c conda-forge -c bioconda plink2
-        if [ ! -x "${RENV_PATH}/bin/plink2" ]; then
-            echo "  ✗ FAILED: plink2 not available in renv after install"
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "  ✓ plink2 added to renv"
-        fi
-    else
-        echo "  ✓ plink2 (already in renv)"
     fi
 fi
 
@@ -268,6 +283,14 @@ for tool in "${CHECK_TOOLS[@]}"; do
         FAILURES=$((FAILURES + 1))
     fi
 done
+
+# plink2 must support --king-cutoff-table (stage-1 duplicate removal, stage-3 relatedness)
+if [ -x "${BIN_DIR}/plink2" ] && plink2_has_king_cutoff_table "${BIN_DIR}/plink2"; then
+    echo "  ✓ plink2 supports --king-cutoff-table"
+else
+    echo "  ✗ FAILED: ${BIN_DIR}/plink2 does not support --king-cutoff-table"
+    FAILURES=$((FAILURES + 1))
+fi
 
 # triple-liftOver: script, both chain files, and the liftOver link
 if [ -f "${TRIPLE_LIFTOVER_DIR}/tripleliftover_v133.pl" ] \

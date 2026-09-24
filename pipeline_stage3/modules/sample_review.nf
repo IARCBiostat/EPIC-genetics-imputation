@@ -160,10 +160,10 @@ process KING_QC {
 
     [ -f ${study_name}_king.kin0 ] || : > ${study_name}_king.kin0
 
+    # --king-cutoff-table needs the sample dataset as input. Let a failure stop the task:
+    # masking it used to report zero related samples for every study.
     if [ -s ${study_name}_king.kin0 ]; then
-      if ! \$PLINK2_BIN --king-cutoff-table ${study_name}_king.kin0 ${params.king_cutoff} --out ${study_name}_related; then
-        : > ${study_name}_related.king.cutoff.out.id
-      fi
+      \$PLINK2_BIN --bfile ${pruned_prefix} --king-cutoff-table ${study_name}_king.kin0 ${params.king_cutoff} --out ${study_name}_related
     else
       : > ${study_name}_related.king.cutoff.out.id
     fi
@@ -240,8 +240,10 @@ process SAMPLE_REVIEW_SUMMARY {
       --ancestry-z-threshold ${params.ancestry_z_threshold} \\
       --het-sd-threshold ${params.het_sd_threshold}
 
+    # Headerless FID/IID list like the het/ancestry files: plink2 writes a '#FID IID'
+    # header even when nobody is removed, which would inflate the line counts below.
     if [ -f ${related_ids} ]; then
-      cp ${related_ids} ${study_name}.related.exclude
+      grep -v '^#' ${related_ids} > ${study_name}.related.exclude || true
     else
       : > ${study_name}.related.exclude
     fi
