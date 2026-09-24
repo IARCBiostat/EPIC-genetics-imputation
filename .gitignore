@@ -5,7 +5,7 @@
 # Allow documentation
 !/README.md
 !/walkthrough.md
-!/.env
+!/.env.example
 !/docs/
 !/envs/
 

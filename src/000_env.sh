@@ -13,7 +13,7 @@ ENV_NAME="nf_EPIC-genetics"
 # ── Environment ────────────────────────────────────────────────────────────────
 ENV_FILE="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)/.env"
 if [ ! -f "$ENV_FILE" ]; then
-    echo "ERROR: .env not found at ${ENV_FILE}. Run from a clone of the repository, which ships .env." >&2
+    echo "ERROR: .env not found at ${ENV_FILE}. Copy .env.example to .env and edit it first." >&2
     exit 1
 fi
 # shellcheck disable=SC1090
