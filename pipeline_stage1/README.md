@@ -34,24 +34,13 @@ Stage 1 is responsible for:
 
 ## 2. Required Input Layout
 
-`--data-root` must point to the archive-style raw data root that contains both the study folders and the shared EPIC ID reference:
+`--data-root` must point to the data root (`DATA_ROOT` in `.env`) laid out by `src/001_data-genetics.sh` and `src/003_data-epic.sh`:
 
-- `Breast/`
-- `Colonrectum/`
-- `Epic_Cvd/`
-- `Gallbladder/`
-- `Interact/`
-- `Kidney/`
-- `Lung/`
-- `Lymphoma/`
-- `Ovary/`
-- `Pancreas/`
-- `Prostate/`
-- `Stomach/`
-- `Uadt/`
-- `Reference/Epic/Subj_Id_2015.txt`
+- `genetics/<STUDY_FOLDER>/`: one folder per study (e.g. `genetics/Glbd_01/`, `genetics/Brea_02_Onco/`), each with its `Data_Received*/` genotypes and `Chip_files/` manifests, copied from the raw archive by `001`
+- `reference/Epic/Subj_Id_2015.txt`: the shared EPIC ID reference, copied by `001`
+- `reference/Epic/EPIC_study_case_status.txt`: per-sample sex and case status, written by `003`
 
-The stage-1 scripts do not operate directly on the flattened sync layout in `data/genetics/`.
+Each study script's `RAW_REL`, `MANIFEST_REL` and `ID_LINK_REL` settings give its paths relative to this root.
 
 ## 3. How To Run Stage 1
 
@@ -71,7 +60,7 @@ To run one study script directly:
 
 ```bash
 python3 pipeline_stage1/scripts/process_brea_01_erneg.py \
-  --data-root /path/to/archive_style_root \
+  --data-root /path/to/data_root \
   --work-root pipeline_stage1/work \
   --plink /path/to/plink \
   --python2 /path/to/python2.7

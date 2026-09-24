@@ -323,7 +323,7 @@ each study's PLINK2 files to your kept samples with `plink2 --keep`, matching on
 
 ```bash
 # samples-keep.tsv columns: study<TAB>IID
-FINAL=/data/Epic/subprojects/Depot_Genetics/sources/finalised_data   # extracted <STUDY>/ pfiles
+FINAL=/path/to/finalised_data   # directory holding the extracted <STUDY>/ pfiles
 OUT=./mystudy_genetics; mkdir -p "$OUT"
 
 for study in $(tail -n +2 samples-keep.tsv | cut -f1 | sort -u); do
@@ -353,6 +353,7 @@ analysis requires (e.g. `plink2 --pmerge-list`).
 - Apptainer available on the compute nodes
 - internet access from the compute nodes: tools and reference data are downloaded, and Nextflow builds its per-process conda environments on first use
 - read access to the raw EPIC genetics archive (`GENETICS_DATA_SOURCE_ROOT`), including `Central_Genetics/*.sas7bdat` and `Reference/Epic/Subj_Id_2015.txt`
+- space for the input data: by default steps 2–3 copy the raw genotypes and download the reference panel and dbSNP (tens of GB) into `data/` inside the clone, so clone onto a large project filesystem (not a quota-limited home directory), or point `DATA_ROOT` and `TOOLS_DIR` in `.env` elsewhere
 
 Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`.
 

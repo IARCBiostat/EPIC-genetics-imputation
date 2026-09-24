@@ -14,11 +14,11 @@
 # Interactive single-study test
 # Copy/paste these lines in an HPC shell to test Brea_01_Erneg directly:
 #
-# cd /data/Epic/subprojects/Genetics/work
+# cd /path/to/EPIC-genetics-imputation   # repository root (GENETICS_PROJECT_ROOT)
 # set -a
 # source .env
 # set +a
-# python3 /data/Epic/subprojects/Genetics/work/pipeline_stage1/scripts/process_brea_01_erneg.py \
+# python3 "${GENETICS_PROJECT_ROOT}/pipeline_stage1/scripts/process_brea_01_erneg.py" \
 #   --data-root "${STAGE1_DATA_ROOT}" \
 #   --work-root "${STAGE1_WORK_ROOT}" \
 #   --plink "${PLINK_BIN}" \
