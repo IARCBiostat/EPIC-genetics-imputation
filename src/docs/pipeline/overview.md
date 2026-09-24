@@ -15,31 +15,31 @@ The EPIC genetics pipeline runs in four sequential stages, each submitted as a S
 
 | Filter | Stage | Threshold |
 | --- | --- | --- |
-| Variant MAF (pre-phasing) | Stage 2 | MAF ≥ 0.005 |
+| Variant MAF (pre-phasing) | Stage 1 | MAF ≥ 0.005 |
 | Imputation quality | Stage 2/3 | R² ≥ 0.3 |
 | Minor allele frequency | Stage 3 | MAF ≥ 0.01 |
 | Hardy-Weinberg equilibrium | Stage 3 | p ≥ 0.000005 (autosomes only) |
 | Heterozygosity outliers | Stage 3 | > 3.0 SD |
-| Relatedness (KING) | Stage 3 | kinship ≥ 0.0884 (reported; removed only with `--exclude-related`) |
-| Ancestry outliers | Stage 3 | z-score ≥ 6.0 on 10 PCs (reported; removed only with `--exclude-ancestry-outliers`) |
+| Relatedness (KING) | Stage 3 | kinship ≥ 0.0884 (reported; removed only with `--related true`) |
+| Ancestry outliers | Stage 3 | z-score ≥ 6.0 on 10 PCs (reported; removed only with `--ancestry true`) |
 
 ## Running the Full Pipeline
 
 ### 1. Configure the environment
 
-Edit `.env` and set `SCRATCH_DATE` to your run label (e.g. `2025-06`). All outputs will be written to `${SCRATCH}/${SCRATCH_DATE}/`.
+Copy `.env.example` to `.env` in the repository root and edit the lines marked `EDIT` (repository path, raw data archive, Apptainer bind paths, scratch area, and `SCRATCH_DATE`, your run label, e.g. `2025-06`). All outputs will be written to `${SCRATCH}/${SCRATCH_DATE}/`. Run every command from the repository root.
 
 ```bash
-bash src/000_env.sh      # validate .env variables
-sbatch src/000_tools.sh  # install pipeline dependencies (bcftools, PLINK2, etc.)
+bash src/000_env.sh      # create the nf_EPIC-genetics and Python 2.7 conda environments
+sbatch src/000_tools.sh  # install tools (bcftools, plink, plink2, SHAPEIT5, liftOver, triple-liftOver)
 ```
 
 ### 2. Prepare input data
 
 ```bash
-sbatch src/001_data-genetics.sh   # copy raw genotype arrays from archive to scratch
-bash src/002_data-reference.sh    # download 1000G GRCh38 reference for imputation
-Rscript src/003_data-epic.R       # prepare EPIC phenotype and sample manifest files
+sbatch src/001_data-genetics.sh   # copy raw genotype arrays and EPIC reference files from the archive
+sbatch src/002_data-reference.sh  # download 1000G GRCh38, FASTA, SHAPEIT5 maps, dbSNP
+sbatch src/003_data-epic.sh       # after 001: build EPIC phenotype and Idepic map files
 ```
 
 ### 3. Run the pipeline stages
@@ -50,7 +50,7 @@ Each stage must complete before the next is submitted. Monitor with `squeue -u $
 sbatch src/004_stage1.sh   # harmonisation + liftover
 sbatch src/005_stage2.sh   # phasing + imputation
 sbatch src/006_stage3.sh   # post-imputation QC + PLINK2 conversion
-bash src/007_stage4.sh     # reports + final archive
+sbatch src/007_stage4.sh   # reports + final archive
 ```
 
 ### 4. Update documentation

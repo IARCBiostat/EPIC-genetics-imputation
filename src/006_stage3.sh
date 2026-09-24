@@ -36,7 +36,7 @@ abs_path() {
 
 resolve_dbsnp_vcf() {
   local candidate
-  local search_dir="${PROJ_ROOT}/data/reference/dbsnp"
+  local search_dir="${REF_DIR:-${PROJ_ROOT}/data/reference}/dbsnp"
 
   [ -n "${STAGE3_DBSNP_VCF:-}" ] && candidate="${STAGE3_DBSNP_VCF}"
   if [ -n "${candidate:-}" ] && [ -f "${candidate}" ]; then

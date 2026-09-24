@@ -18,7 +18,9 @@
 
 # Exclude specific sub-directories and files within allowed paths
 /src/test/
-/src/logs/
+# Keep src/logs/ itself (Slurm cannot open #SBATCH --output in a missing directory)
+/src/logs/*
+!/src/logs/.gitkeep
 /pipeline_stage1/.nextflow_work/
 /pipeline_stage1/work/
 /pipeline_stage2/work/

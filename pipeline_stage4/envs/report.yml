@@ -1,6 +1,6 @@
 name: stage4_report
 channels:
   - conda-forge
-  - defaults
+  - nodefaults
 dependencies:
   - python>=3.9

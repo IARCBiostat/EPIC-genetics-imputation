@@ -213,7 +213,7 @@ fi
 
 if [ ! -f "$EPIC_CASE_STATUS_FILE" ]; then
   echo "ERROR: Shared EPIC case-status reference not found: ${EPIC_CASE_STATUS_FILE}" >&2
-  echo "       Run Rscript src/003_data-epic.R first or set EPIC_CASE_STATUS_FILE explicitly." >&2
+  echo "       Run sbatch src/003_data-epic.sh first or set EPIC_CASE_STATUS_FILE explicitly." >&2
   exit 1
 fi
 

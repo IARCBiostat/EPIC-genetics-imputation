@@ -16,12 +16,14 @@ Stage-specific documentation:
 
 Some code/scripts/functions and processes used in this pipeline are direct copies or adaptations from prior EPIC genetics pipelines by: Joshua Atkins, Marie Breeur, Aurelie Gabriel, Emilie Gerard-Marchant, Manon Knuchel...
 
+To run the pipeline from a fresh clone, see [How To Run](#how-to-run). Output paths in the stage descriptions below are relative to the run directory `${SCRATCH}/${SCRATCH_DATE}/` (see [Output](#output)).
+
 ## Stage 1: Study Harmonization and Genome-Build Standardization
 
 - Directory: `pipeline_stage1/`
 - Main purpose: Convert each raw study into a harmonized hg38 PLINK handoff
 - Primary input:  raw study data plus manifests and EPIC ID linkage files
-- Primary output: `analysis/<STUDY>/stage1/<STUDY>.bed/.bim/.fam`
+- Primary output: `studies/<STUDY>/stage1/<STUDY>.bed/.bim/.fam`
 - Submission script: `src/004_stage1.sh` 
 
 Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each study is processed with its own bespoke script because the original deliveries differ in array platform, allele coding, chromosome naming, manifest structure, and identifier linkage rules. All downstream matching is coordinate-based and assumes one common genome build. All downstream tools expect each study to exist as one standardized PLINK handoff.
@@ -32,6 +34,7 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 2. applies study-specific preprocessing such as BIM sorting, AB-allele translation, sex-chromosome handling, and build-specific logic
 3. standardizes all studies onto GRCh38
 4. writes one consistent study-level PLINK dataset for the next stage
+5. applies pre-phasing sample and variant QC (STAGE1_QC) to that dataset: sex check, heterozygosity outliers, duplicate removal, HWE, and MAF
 
 #### Data used:
 
@@ -39,21 +42,20 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 - study-specific chip manifests and metadata files
 - study-specific EPIC linkage files
 - the shared EPIC ID reference
-- LiftOver resources used for build conversion to GRCh38
+- [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) and its UCSC chain files (`hg18ToHg38`, `hg19ToHg38`) for build conversion to GRCh38
 
 ## Stage 2: Phasing and Imputation
 
 - Directory: `pipeline_stage2/`
 - Main purpose: Export stage-1 PLINK data to per-chromosome target VCFs, phase, and impute
-- Primary input:  `analysis/<STUDY>/stage1/` plus 1000G GRCh38 reference and SHAPEIT5 genetic map
-- Primary output: `analysis/<STUDY>/stage2/<STUDY>_chr*_GxS.imputed.vcf.gz`
+- Primary input:  `studies/<STUDY>/stage1/` (already QC'd at the end of stage 1) plus 1000G GRCh38 reference and SHAPEIT5 genetic map
+- Primary output: `studies/<STUDY>/stage2/<STUDY>_chr*_GxS.imputed.vcf.gz`
 - Submission script: `src/005_stage2.sh` 
 
 #### What this stage does:
-1. performs pre-phasing sample and variant QC
-2. phases autosomes and chrX against the 1000G reference
-3. imputes each phased chromosome against the 1000G reference panel
-4. generates per-study phasing and imputation reports
+1. phases autosomes and chrX against the 1000G reference
+2. imputes each phased chromosome against the 1000G reference panel
+3. generates per-study phasing and imputation reports
 
 ### Phasing
 
@@ -67,8 +69,8 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 #### How:
 
-- stage-1 PLINK files are first passed through a pre-phasing QC step (STAGE1_QC) that applies sex checks, heterozygosity filtering, duplicate removal, HWE, and MAF filters
-- the QC-cleaned data are then exported to per-chromosome target VCFs
+- the stage-1 PLINK handoffs have already passed the pre-phasing QC step at the end of stage 1 (STAGE1_QC: sex checks, heterozygosity filtering, duplicate removal, HWE, and MAF filters)
+- the QC-cleaned data are exported to per-chromosome target VCFs
 - SHAPEIT5 phases each study chromosome against the matching public reference chromosome
 - chrX is handled separately because `PAR1`, `nonPAR`, and `PAR2` require different treatment; see [here](https://github.com/statgen/Minimac4/issues/74)
 
@@ -108,8 +110,8 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 
 - Directory: `pipeline_stage3/`
 - Main purpose: Annotate rsIDs, filter imputed variants, convert to PLINK2, and perform sample QC
-- Primary input: `analysis/<STUDY>/stage2/` plus [dbSNP](https://en.wikipedia.org/wiki/DbSNP) GRCh38
-- Primary output: `analysis/<STUDY>/stage3/final/<STUDY>_chr*.pgen/.pvar/.psam`
+- Primary input: `studies/<STUDY>/stage2/` plus [dbSNP](https://en.wikipedia.org/wiki/DbSNP) GRCh38
+- Primary output: `studies/<STUDY>/stage3/final/<STUDY>_chr*.pgen/.pvar/.psam`
 - Submission script: `src/006_stage3.sh`
 
 Stage 3 turns the chromosome-level imputed VCFs from stage 2 into analysis-ready per-chromosome PLINK2 datasets. It combines four linked operations into one workflow:
@@ -143,7 +145,7 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into analysis-ready
 - sample QC estimates relatedness with KING, identifies [heterozygosity](https://en.wikipedia.org/wiki/Heterozygosity) outliers, and runs [PCA](https://en.wikipedia.org/wiki/Principal_component_analysis)-based ancestry QC
 - recorded sex is updated from the stage-1 `.fam` file during per-chromosome finalization
 - a final sample-removal list is built from the required QC exclusions; ancestry outliers are identified but not removed by default
-- Stage 3-only tables, figures, flags, and HTML reports are written under `analysis/<STUDY>/stage3/report/`
+- Stage 3-only tables, figures, flags, and HTML reports are written under `studies/<STUDY>/stage3/report/`
 
 #### Data used:
 
@@ -159,7 +161,7 @@ Stage 3 turns the chromosome-level imputed VCFs from stage 2 into analysis-ready
 
 - Directory: `pipeline_stage4/`
 - Main purpose: Generate per-study cross-stage master HTML reports and build the final deliverable archive
-- Primary input: `analysis/<STUDY>/stage3/` outputs plus stage 2 HTML reports
+- Primary input: `studies/<STUDY>/stage3/` outputs plus stage 2 HTML reports
 - Primary output: `final/<STUDY>/` with archive, master HTML, and QC review files
 - Submission script: `src/007_stage4.sh`
 
@@ -216,7 +218,7 @@ ${SCRATCH}/${SCRATCH_DATE}/
 │   └── .nextflow/                    # Nextflow cache and history (stage 4)
 └── final/                            # finalised outputs (007_stage4.sh)
     ├── <STUDY>/
-    │   ├── <STUDY>.stage3.tar.gz     # per-chromosome PLINK2 pfiles + QC exclude lists
+    │   ├── <STUDY>.tar.gz            # per-chromosome PLINK2 pfiles + QC exclude lists
     │   ├── report-stage2.html
     │   ├── report-stage3.html
     │   ├── report-master.html
@@ -342,73 +344,109 @@ This writes per-study, per-chromosome PLINK2 files containing only your particip
 de-duplicated across studies. From there you can merge across studies/chromosomes as your
 analysis requires (e.g. `plink2 --pmerge-list`).
 
-## How To Run 
+## How To Run
 
-### 0: `.env` and `tools/`
+### Prerequisites
 
-You must first ensure that you have created a `.env` file at root, see: [.env.example](.env.example)
+- a Slurm cluster with a partition called `low_p`. The partition is set in each script's `#SBATCH` header and in `.env`; change both if your cluster uses a different name
+- `conda` (Miniconda or Miniforge) initialised in the shell you submit jobs from
+- Apptainer available on the compute nodes
+- internet access from the compute nodes: tools and reference data are downloaded, and Nextflow builds its per-process conda environments on first use
+- read access to the raw EPIC genetics archive (`GENETICS_DATA_SOURCE_ROOT`), including `Central_Genetics/*.sas7bdat` and `Reference/Epic/Subj_Id_2015.txt`
+
+Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`.
+
+### 0: clone and configure `.env`
+
+```bash
+git clone https://github.com/IARCBiostat/EPIC-genetics-imputation.git
+cd EPIC-genetics-imputation
+cp .env.example .env
+```
+
+Edit the lines marked `EDIT` in `.env`; everything else derives from them:
+
+| Variable | Set to |
+| --- | --- |
+| `GENETICS_PROJECT_ROOT` | absolute path of this cloned repository (the output of `pwd` above) |
+| `GENETICS_DATA_SOURCE_ROOT` | the raw EPIC genetics archive (`.../Genetics/sources/Gwas`) |
+| `APPTAINER_BINDPATH` | host paths Apptainer must mount, e.g. `/data:/data,/scratch:/scratch` |
+| `SCRATCH` | scratch area for outputs and Nextflow work directories |
+| `SCRATCH_DATE` | a label for this run, e.g. `2026-09-24` |
+
+By default, tools are installed to `${GENETICS_PROJECT_ROOT}/tools`, and input data are copied/downloaded to `${GENETICS_PROJECT_ROOT}/data`, with reference data in `data/reference`. `TOOLS_DIR` and `DATA_ROOT` can point elsewhere. Keep `REF_DIR` at `${DATA_ROOT}/reference`, because stage 1 reads the EPIC reference files from there.
 
 > **Important — set `SCRATCH_DATE` before running.**
 > All pipeline stages write their outputs under `${SCRATCH}/${SCRATCH_DATE}/`. You must set `SCRATCH_DATE` to a date string (e.g. `2026-05-28`) in `.env` before submitting any stage, and keep it the same value for the entire analysis run. If you start a fresh analysis, update `SCRATCH_DATE` to a new date so the new run writes to a separate directory. The `.env.example` ships with `SCRATCH_DATE="CHANGE-ME"` as a deliberate placeholder.
 
-You must set-up a minimal `conda` environment:
+### 1: install environments and tools
+
+Create the `nf_EPIC-genetics` conda environment (Nextflow, Java, Python 3, R) and the Python 2.7 environment used by the legacy stage-1 scripts (at `${GENETICS_PROJECT_ROOT}/.conda/py27`):
 
 ```bash
 bash src/000_env.sh
 ```
 
-You must download and compile all tools which are not available through `conda`; we run this as a job as it takes a while:
+Install the tools that run outside Nextflow's per-process conda environments. That is htslib/bcftools (compiled), plink 1.9, SHAPEIT5 and UCSC liftOver (Apptainer images), plink2 and R (conda), and [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) with its chain files. This runs as a job because compiling takes a while:
 
 ```bash
 sbatch src/000_tools.sh
 ```
 
-### 1: prepare study data
+Check that `src/logs/000_tools.out` ends with `ALL TOOLS VERIFIED SUCCESSFULLY` before continuing.
 
-We create a copy of all required EPIC genetics data files:
+### 2: prepare study data
+
+We create a copy of all required EPIC genetics data files in `${DATA_ROOT}/genetics`, and the EPIC reference files in `${DATA_ROOT}/reference/Epic`:
 
 ```bash
 sbatch src/001_data-genetics.sh
 ```
 
-### 2: download reference data
+### 3: download reference data
 
-We download all of the required reference data:
+We download all of the required reference data into `${REF_DIR}`:
 1. 1000 Genomes NYGC 2022 high-coverage VCFs (GRCh38)
-2. SHAPEIT5 GRCh38 genetic map
-3. dbSNP GRCh38 VCF
-4. Annovar hg38 Database
+2. GRCh38 no-alt reference FASTA
+3. SHAPEIT5 GRCh38 genetic map
+4. dbSNP GRCh38 VCF
 
 ```bash
-bash src/002_data-reference.sh
+sbatch src/002_data-reference.sh
 ```
 
-### 3: prepare EPIC data
+Steps 2 and 3 are independent and can run at the same time.
 
-We need to create a reference file which provides information on sex and case status for each sample as this is not provided in the raw genetics data:
+### 4: prepare EPIC data
+
+We need to create a reference file which provides information on sex and case status for each sample as this is not provided in the raw genetics data. This needs the files copied in step 2:
 
 ```bash
-Rscript src/003_data-epic.R
+sbatch src/003_data-epic.sh
 ```
 
-### 4: stage1, stage2, and stage3
+This writes `EPIC_study_case_status.txt` and `EPIC_Idepic_map.tsv` to `${DATA_ROOT}/reference/Epic`.
 
-We can only run `stage1`, `stage2`, and `stage3` sequentially as `stage2`, and `stage3` are dependent upon the prior stages handoff data. We use the same `sbatch src/00*_stage*.sh` command for each.
+### 5: stage1, stage2, and stage3
 
-We can run a `stage` for all studies simultaneously:
+We can only run `stage1`, `stage2`, and `stage3` sequentially as `stage2`, and `stage3` are dependent upon the prior stages handoff data. Each command runs a stage for all studies simultaneously; submit the next one only when the previous job has finished:
 
 ```bash
 sbatch src/004_stage1.sh
+sbatch src/005_stage2.sh
+sbatch src/006_stage3.sh
 ```
 
-Before progressing to `stage2` and `stage3` and from `stage3` to finalisation, you must look at the `stage1-summary.md`, `stage2-summary.md`, `stage3-summary.md` and `stage2` and `stage3` reports to check that the studies have completed and the pre-QC, phasing and imputation, and post-QC are good.
+Each job launches a Nextflow run that submits its own tasks to Slurm, and stays running until the stage completes. Follow it with `squeue -u $USER` and the logs in `src/logs/`.
 
-### 5: report and finalising
+Before progressing to `stage2` and `stage3` and from `stage3` to finalisation, you must look at the `stage1-summary.md`, `stage2-summary.md`, `stage3-summary.md` (in `${SCRATCH}/${SCRATCH_DATE}/studies/`) and `stage2` and `stage3` reports to check that the studies have completed and the pre-QC, phasing and imputation, and post-QC are good.
+
+### 6: report and finalising
 
 With all stages finished we generate the master cross-stage HTML reports and build the final deliverable archive for each study:
 
 ```bash
-bash src/007_stage4.sh
+sbatch src/007_stage4.sh
 ```
 
 ### testing/other
@@ -419,13 +457,13 @@ We can perform a test across a single study if needed; we use `Glbd_01` for test
 STAGE1_SCRIPTS=process_glbd_01.py sbatch src/004_stage1.sh
 sbatch src/005_stage2.sh --study Glbd_01
 sbatch src/006_stage3.sh --study Glbd_01
-bash src/007_stage4.sh --study Glbd_01
+sbatch src/007_stage4.sh --study Glbd_01
 ```
 
 Relatedness and ancestry outlier exclusions are off by default. To enable them:
 
 ```bash
-sbatch src/006_stage3.sh --exclude-related --exclude-ancestry-outliers
+sbatch src/006_stage3.sh --related true --ancestry true
 ```
 
 ## Methods And Thresholds Summary
@@ -441,12 +479,12 @@ sbatch src/006_stage3.sh --exclude-related --exclude-ancestry-outliers
 | Completion / repair step | Remaining variants have metadata repaired before the second exclusion pass | No single global numeric threshold; study-specific completion mode decides whether to update chromosome, position, strand, alleles, or rsID-based metadata | Converts the dataset into the best possible harmonized pre-final state |
 | SNP exclusion part 2 | Final cleanup on the completed dataset | Always removes misplaced mitochondrial SNPs and duplicate classes 4, 2, 3, and 1; two studies also apply an extra build-35 exclusion list | Produces the final post-QC stage-1 prefix before liftover |
 | Build harmonization | Final post-QC data are lifted to GRCh38 / hg38 | Build 36 -> `hg18ToHg38`; build 37 -> `hg19ToHg38`; final PLINK step uses `--split-x b38 no-fail` | Ensures all studies enter stage 2 on a common assembly |
+| Pre-phasing QC | The hg38 PLINK handoffs are filtered before phasing to remove problematic samples and variants (`STAGE1_QC`, run at the end of stage 1) | Sex check: F-stat < 0.2 (female), > 0.8 (male); het outliers: > 3.0 SD; KING duplicate cutoff: 0.354; HWE p < 0.000001; MAF < 0.005 | Requires ≥ 100 chrX variants for sex check; sex mismatches, het outliers, and duplicates are removed; HWE and MAF filters applied on autosomes |
 
 ### Stage 2
 
 | Method area | What is done | Active arguments / thresholds | Notes |
 | --- | --- | --- | --- |
-| Pre-phasing QC | Stage-1 PLINK handoffs are filtered before phasing to remove problematic samples and variants | Sex check: F-stat < 0.2 (female), > 0.8 (male); het outliers: > 3.0 SD; KING duplicate cutoff: 0.354; HWE p < 0.000001; MAF < 0.005 | Requires ≥ 100 chrX variants for sex check; sex mismatches, het outliers, and duplicates are removed; HWE and MAF filters applied on autosomes |
 | Target VCF export | QC-cleaned PLINK data are exported chromosome by chromosome to target VCF | Chromosomes renamed to UCSC style; IDs rewritten to `CHROM:POS:REF:ALT`; multiallelics split | Chromosomes absent in stage 1 are skipped cleanly |
 | Reference preparation | 1000 Genomes reference VCFs are normalized and converted to per-chromosome BCF / `msav` files | Reference filter includes `MAC >= 10` during prep; chrX keeps SNPs and indels only | chrX is handled as `PAR1`, `nonPAR`, and `PAR2` |
 | Phasing | SHAPEIT5 phases each study chromosome against the matching reference chromosome | `phase_cpus = 4`; uses SHAPEIT5 genetic recombination map | chrX is phased block by block as `PAR1`, `nonPAR`, `PAR2`; SHAPEIT5 outputs BCF which is converted to VCF.gz |
@@ -464,10 +502,10 @@ sbatch src/006_stage3.sh --exclude-related --exclude-ancestry-outliers
 | Variant QC: HWE | Hardy-Weinberg equilibrium filtering is applied by default on autosomes | `run_hwe = true`; `hwe_p = 0.000005`; `hwe_k = 0`; mode `midp keep-fewhet` | chrX is not HWE filtered |
 | PLINK2 conversion | Filtered imputed VCFs are converted to per-chromosome `pgen/pvar/psam` files; each chromosome is finalized independently | Uses dosage import from `HDS`; chrX uses `--split-par b38` and `--lax-chrx-import` | Final output is per-chromosome; no genome-wide merge is performed |
 | LD pruning for QC | Per-chromosome LD pruning is run in parallel across all 22 autosomes; pruned BED files are merged into one small genome-wide BED for sample QC only | `--indep-pairwise 1500 150 0.2`; duplicate variant IDs resolved with `--set-all-var-ids '@:#:$r:$a' --rm-dup force-first` | The merged LD-pruned BED is an intermediate used only for KING and PCA; it is not the final output |
-| Sample QC: relatedness | Related or duplicate samples are identified with KING | `king_cutoff = 0.0884` | Relatedness is always computed and reported; exclusion from the final dataset only happens when `--exclude-related` is set (default: off) |
+| Sample QC: relatedness | Related or duplicate samples are identified with KING | `king_cutoff = 0.0884` | Relatedness is always computed and reported; exclusion from the final dataset only happens when `--related true` is set (default: off) |
 | Sample QC: heterozygosity | Heterozygosity outliers are identified from the LD-pruned autosomal dataset | `het_sd_threshold = 3.0` | Samples beyond the SD threshold are added to the removal list |
 | Sample QC: ancestry identification | PCA-based ancestry outliers are identified for every study | `ancestry_pc_count = 10`; `ancestry_z_threshold = 6.0` | Identification is always performed |
-| Sample QC: ancestry exclusion | Ancestry outliers are optionally excluded from the final dataset | `exclude_ancestry_outliers = false` by default; use `--exclude-ancestry-outliers` to remove them | Ancestry outlier detection always runs; only the removal step is conditional |
+| Sample QC: ancestry exclusion | Ancestry outliers are optionally excluded from the final dataset | `ancestry = false` by default; use `--ancestry true` to remove them | Ancestry outlier detection always runs; only the removal step is conditional |
 | Sample QC: sex update | Recorded sex is updated from the stage-1 `.fam` during per-chromosome finalization | No separate numeric threshold | Applied in FINALIZE_CHROM alongside sample removal |
 
 ### Summary Table
@@ -512,7 +550,7 @@ The UpSet plot below shows the intersection sizes across studies. Each bar repre
 
 ## Filtering Steps Reference
 
-All numeric filters applied across the three pipeline stages are listed below. Stage 1 and Stage 2 filters are set in the respective `nextflow.config` and `params.yaml` files; Stage 3 filters are set in `src/006_stage3.sh` and passed as Nextflow parameters.
+All numeric filters applied across the three pipeline stages are listed below. Stage 1 and Stage 2 filters are set in the respective `nextflow.config` and `params.yaml` files; Stage 3 filters are set in `pipeline_stage3/params.yaml` and can be overridden per run with `src/006_stage3.sh` flags (`--min-r2`, `--maf`, `--hwe`, `--hwe-p`, `--related`, `--ancestry`).
 
 | Filter | Stage | Threshold | Description |
 | --- | --- | --- | --- |
@@ -531,9 +569,9 @@ All numeric filters applied across the three pipeline stages are listed below. S
 | Imputation quality (R²) | Stage 3 | R² ≥ 0.3 | Post-imputation filter on `INFO/R2` applied before PLINK2 conversion; removes poorly imputed variants from the final dataset |
 | Minor allele frequency | Stage 3 | MAF ≥ 0.01 | Applied together with the R² filter before PLINK2 conversion; removes very rare variants from the final dataset |
 | Hardy-Weinberg equilibrium | Stage 3 | p ≥ 0.000005 | Applied on autosomes only (`midp keep-fewhet`); chrX is not HWE filtered; removes variants deviating from equilibrium expectation |
-| Relatedness / kinship | Stage 3 | KING kinship ≥ 0.0884 | Identifies sample pairs at 2nd-degree or closer relationship; the identified count is always reported; one sample per pair is removed only when `--exclude-related` is set (default: off) |
+| Relatedness / kinship | Stage 3 | KING kinship ≥ 0.0884 | Identifies sample pairs at 2nd-degree or closer relationship; the identified count is always reported; one sample per pair is removed only when `--related true` is set (default: off) |
 | Heterozygosity outliers | Stage 3 | > 3.0 SD from study mean | Removes samples with excess or deficit heterozygosity from the LD-pruned autosomal dataset post-imputation |
-| Ancestry outliers | Stage 3 | z-score ≥ 6.0 on 10 PCs | PCA-based ancestry outlier identification using 1000G reference principal components; the identified count is always reported; outliers removed only when `--exclude-ancestry-outliers` is set (default: off) |
+| Ancestry outliers | Stage 3 | z-score ≥ 6.0 on 10 PCs | PCA-based ancestry outlier identification using 1000G reference principal components; the identified count is always reported; outliers removed only when `--ancestry true` is set (default: off) |
 
 ## Finalised Data
 

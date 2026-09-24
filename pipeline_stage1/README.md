@@ -1,5 +1,7 @@
 # pipeline_stage1
 
+> Paths written as `analysis/<STUDY>/...` are relative to the analysis root, which the `src/` submission scripts set to `${SCRATCH}/${SCRATCH_DATE}/studies/` from `.env`. Setup and run order are in the [top-level README](../README.md#how-to-run).
+
 Stage 1 converts each raw EPIC genetics dataset into a harmonized hg38 PLINK handoff ready for stage 2.
 
 The stage-1 workflow standardizes all studies into a common coordinate system and genome build.
@@ -75,13 +77,13 @@ python3 pipeline_stage1/scripts/process_brea_01_erneg.py \
   --python2 /path/to/python2.7
 ```
 
-Required runtime tools:
+Required runtime tools (all installed by `src/000_env.sh` and `src/000_tools.sh`):
 
 - `python3`
-- `python2.7`
+- `python2.7` (`PYTHON2_BIN`, the conda environment at `${GENETICS_PROJECT_ROOT}/.conda/py27`)
 - `plink`
 - `perl`
-- Linux `x86_64` support for the bundled UCSC `liftOver` binary used by the vendored `triple-liftOver` workflow
+- [`triple-liftOver`](https://github.com/GraceSheng/triple-liftOver) at `STAGE1_TRIPLE_LIFTOVER_DIR` (default `${TOOLS_DIR}/triple-liftOver`), including `library/chainfiles/{hg18,hg19}ToHg38.over.chain.gz`; its `library/liftOver` is linked to the Apptainer UCSC `liftOver` wrapper
 
 ## 4. Ordered Execution Inside Each Stage-1 Script
 
@@ -219,7 +221,7 @@ These outputs are stored in `Trace/QC_exclusion/` and serve as the final pre-lif
 
 ### 4.11 Step 11: Liftover The Final Dataset To hg38
 
-The post-QC dataset is lifted to GRCh38 / hg38 using the vendored Perl `triple-liftOver` workflow.
+The post-QC dataset is lifted to GRCh38 / hg38 using the Perl [`triple-liftOver`](https://github.com/GraceSheng/triple-liftOver) workflow (v1.33, installed by `src/000_tools.sh`).
 
 The stage-1 liftover step:
 
@@ -244,7 +246,7 @@ This is deliberate: stage 1 is designed to be auditable study by study.
 
 After all study scripts complete, `src/004_stage1.sh` runs two reporting steps:
 
-1. **Study-level reports** — `pipeline_stage1/scripts/run_stage1_reports.py` generates per-study figures, tables, and HTML report assets under `analysis/<STUDY>/stage1/report/`. These are consumed by the cross-stage master report generator (`src/007_report.sh`).
+1. **Study-level reports** — `pipeline_stage1/scripts/run_stage1_reports.py` generates per-study figures, tables, and HTML report assets under `analysis/<STUDY>/stage1/report/`. These are consumed by the cross-stage master report generator (`src/007_stage4.sh`).
 
 2. **Cross-study summary** — `pipeline_stage1/scripts/summary.py` writes a markdown summary of sample and variant counts across all studies to `analysis/stage1-summary.md`.
 
