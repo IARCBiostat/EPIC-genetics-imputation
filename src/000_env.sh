@@ -18,6 +18,13 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+REPO_DIR="$(cd "$(dirname "$ENV_FILE")" && pwd -P)"
+if [ "$(cd "${GENETICS_PROJECT_ROOT:-}" 2>/dev/null && pwd -P || true)" != "$REPO_DIR" ]; then
+    echo "ERROR: GENETICS_PROJECT_ROOT in .env must be this repository's directory." >&2
+    echo "       .env has:   ${GENETICS_PROJECT_ROOT:-<unset>}" >&2
+    echo "       repository: ${REPO_DIR}" >&2
+    exit 1
+fi
 PYTHON2_ENV="${PYTHON2_ENV:-${GENETICS_PROJECT_ROOT}/.conda/py27}"
 
 echo "=========================================="

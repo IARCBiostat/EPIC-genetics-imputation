@@ -368,8 +368,8 @@ The repository ships a `.env` with placeholder values. Edit the lines marked `ED
 
 | Variable | Set to |
 | --- | --- |
-| `GENETICS_PROJECT_ROOT` | absolute path of this cloned repository (the output of `pwd` above) |
-| `GENETICS_DATA_SOURCE_ROOT` | the raw EPIC genetics archive (`.../Genetics/sources/Gwas`) |
+| `GENETICS_PROJECT_ROOT` | absolute path of this cloned repository: exactly the output of `pwd` above, with nothing appended |
+| `GENETICS_DATA_SOURCE_ROOT` | the raw EPIC genetics archive: the folder that directly contains `Reference/Epic/`, `Central_Genetics/` and the study folders (`Breast/`, `Colonrectum/`, `Epic_Cvd/`, …) |
 | `APPTAINER_BINDPATH` | host paths Apptainer must mount, as comma-separated `host:container` pairs covering the data, tools and scratch areas |
 | `SCRATCH` | scratch area for outputs and Nextflow work directories |
 | `SCRATCH_DATE` | a label for this run, e.g. `2026-09-24` |
@@ -410,6 +410,8 @@ We create a copy of all required EPIC genetics data files in `${DATA_ROOT}/genet
 ```bash
 sbatch src/001_data-genetics.sh
 ```
+
+Before copying anything, the script checks that `GENETICS_PROJECT_ROOT` is this repository and that every expected folder and file exists under `GENETICS_DATA_SOURCE_ROOT`. If a check fails, it lists what is wrong in `src/logs/001_data_genetics.err`.
 
 ### 3: download reference data
 

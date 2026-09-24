@@ -24,19 +24,23 @@ SOURCE_ROOT="${GENETICS_DATA_SOURCE_ROOT}"
 DEST_ROOT="${DATA_ROOT}/genetics"
 EPIC_REF_DEST_ROOT="${REF_DIR}/Epic"
 
-echo "=========================================="
-echo " Synchronizing Genetics Data"
-echo " From: $SOURCE_ROOT"
-echo " To:   $DEST_ROOT"
-echo "=========================================="
-
-mkdir -p "$DEST_ROOT"
-mkdir -p "$EPIC_REF_DEST_ROOT"
-
-rsync -avP "${SOURCE_ROOT}/Reference/Epic/Subj_Id_2015.txt" "${EPIC_REF_DEST_ROOT}/Subj_Id_2015.txt"
-rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_caco.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_caco.sas7bdat"
-rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_id.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_id.sas7bdat"
-rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics.sas7bdat"
+# ── Check .env before copying anything ────────────────────────────────────────
+ENV_ERRORS=0
+for var in GENETICS_PROJECT_ROOT GENETICS_DATA_SOURCE_ROOT; do
+  val="${!var:-}"
+  if [ -z "$val" ] || [[ "$val" == /CHANGE* ]]; then
+    echo "ERROR: ${var} in .env still needs setting (currently '${val}')." >&2
+    ENV_ERRORS=1
+  fi
+done
+REPO_DIR="$(cd "$(dirname "$ENV_FILE")" && pwd -P)"
+if [ "$(cd "$PROJ_ROOT" 2>/dev/null && pwd -P || true)" != "$REPO_DIR" ]; then
+  echo "ERROR: GENETICS_PROJECT_ROOT must be this repository's directory." >&2
+  echo "       .env has:   ${PROJ_ROOT}" >&2
+  echo "       repository: ${REPO_DIR}" >&2
+  ENV_ERRORS=1
+fi
+[ "$ENV_ERRORS" -eq 0 ] || exit 1
 
 # ── Study Definition Mapping ──────────────────────────────────────────────────
 # Format:
@@ -75,14 +79,65 @@ STUDIES=(
     "Uadt_01|Uadt/Uadt_01"
 )
 
-# ── Sync Loop ──────────────────────────────────────────────────────────────────
-for entry in "${STUDIES[@]}"; do
-    IFS="|" read -r STUDY_NAME SUB_PATH DATA_OVERRIDE CHIP_OVERRIDE EXTRA_PLINK_PREFIX EXTRA_PLINK_DEST EXTRA_FILE_PATH EXTRA_FILE_DEST <<< "$entry"
+# Split a STUDIES entry into its fields, applying the folder defaults.
+parse_study_entry() {
+    IFS="|" read -r STUDY_NAME SUB_PATH DATA_OVERRIDE CHIP_OVERRIDE EXTRA_PLINK_PREFIX EXTRA_PLINK_DEST EXTRA_FILE_PATH EXTRA_FILE_DEST <<< "$1"
     DATA_FLD="${DATA_OVERRIDE:-Data_Received}"
     CHIP_FLD="${CHIP_OVERRIDE:-Chip_files}"
-    
+}
+
+# ── Check the source archive layout ───────────────────────────────────────────
+# Every path the sync reads must exist, so a wrong GENETICS_DATA_SOURCE_ROOT fails
+# here with the full list rather than partway through a multi-hour copy.
+MISSING=()
+require() {
+    local kind="$1" rel="$2"
+    if [ "$kind" = dir ] && [ ! -d "${SOURCE_ROOT}/${rel}" ]; then MISSING+=("${rel}/"); fi
+    if [ "$kind" = file ] && [ ! -f "${SOURCE_ROOT}/${rel}" ]; then MISSING+=("${rel}"); fi
+}
+
+require file "Reference/Epic/Subj_Id_2015.txt"
+require file "Central_Genetics/genetics_caco.sas7bdat"
+require file "Central_Genetics/genetics_id.sas7bdat"
+require file "Central_Genetics/genetics.sas7bdat"
+for entry in "${STUDIES[@]}"; do
+    parse_study_entry "$entry"
+    if [ "$DATA_FLD" != "." ]; then require dir "${SUB_PATH}/${DATA_FLD}"; else require dir "${SUB_PATH}"; fi
+    if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then require dir "${SUB_PATH}/${CHIP_FLD}"; fi
+    if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
+        for ext in bed bim fam; do require file "${EXTRA_PLINK_PREFIX}.${ext}"; done
+    fi
+    if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then require file "${EXTRA_FILE_PATH}"; fi
+done
+
+if [ "${#MISSING[@]}" -gt 0 ]; then
+    echo "ERROR: GENETICS_DATA_SOURCE_ROOT (${SOURCE_ROOT}) is missing ${#MISSING[@]} expected path(s):" >&2
+    printf '         %s\n' "${MISSING[@]}" >&2
+    echo "       It must be the raw EPIC genetics archive containing Reference/Epic/," >&2
+    echo "       Central_Genetics/ and the study folders (Breast/, Colonrectum/, ...)." >&2
+    exit 1
+fi
+
+echo "=========================================="
+echo " Synchronizing Genetics Data"
+echo " From: $SOURCE_ROOT"
+echo " To:   $DEST_ROOT"
+echo "=========================================="
+
+mkdir -p "$DEST_ROOT"
+mkdir -p "$EPIC_REF_DEST_ROOT"
+
+rsync -avP "${SOURCE_ROOT}/Reference/Epic/Subj_Id_2015.txt" "${EPIC_REF_DEST_ROOT}/Subj_Id_2015.txt"
+rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_caco.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_caco.sas7bdat"
+rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_id.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_id.sas7bdat"
+rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics.sas7bdat"
+
+# ── Sync Loop ──────────────────────────────────────────────────────────────────
+for entry in "${STUDIES[@]}"; do
+    parse_study_entry "$entry"
+
     echo "--- Syncing ${STUDY_NAME} ---"
-    
+
     # Create target paths
     TGT_DIR="${DEST_ROOT}/${STUDY_NAME}"
     mkdir -p "$TGT_DIR"
