@@ -5,7 +5,9 @@
 # Allow documentation
 !/README.md
 !/walkthrough.md
-!/.env.example
+# .env is a placeholder template that users edit in place. Never commit changes to it:
+# git pull leaves each user's edited copy alone only while the repository copy is unchanged.
+!/.env
 !/docs/
 !/envs/
 
