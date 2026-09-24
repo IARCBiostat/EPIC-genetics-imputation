@@ -291,6 +291,40 @@ if [ ! -f "${FASTA_REF}" ]; then
   exit 1
 fi
 
+# Index the reference FASTA once, before Nextflow starts. Otherwise every
+# PREP_REFERENCE task builds ${FASTA_REF}.fai at the same moment on the shared
+# filesystem, and a task can read another's half-written index
+# ("The sequence "chr1" was not found").
+fasta_index_ok() {
+  local fai="${FASTA_REF}.fai" c
+  [ -s "$fai" ] && [ ! "$fai" -ot "${FASTA_REF}" ] || return 1
+  # one well-formed line per sequence, no duplicates, all analysed chromosomes present
+  [ "$(wc -l < "$fai")" -eq "$(grep -c '^>' "${FASTA_REF}")" ] || return 1
+  awk -F'\t' 'NF != 5 || $2 !~ /^[0-9]+$/ {bad=1} END {exit bad}' "$fai" || return 1
+  [ -z "$(cut -f1 "$fai" | sort | uniq -d)" ] || return 1
+  for c in $(seq 1 22) X; do
+    awk -F'\t' -v c="chr${c}" '$1 == c {found=1} END {exit !found}' "$fai" || return 1
+  done
+}
+if ! fasta_index_ok; then
+  FAI_BCFTOOLS="${GENETICS_TOOLS_BIN:-}/bcftools"
+  [ -x "${FAI_BCFTOOLS}" ] || FAI_BCFTOOLS="$(command -v bcftools || true)"
+  if [ -z "${FAI_BCFTOOLS}" ]; then
+    echo "ERROR: bcftools not found to index ${FASTA_REF}; rerun sbatch src/000_tools.sh" >&2
+    exit 1
+  fi
+  echo "Indexing reference FASTA once before launching tasks: ${FASTA_REF}.fai"
+  rm -f "${FASTA_REF}.fai"
+  # bcftools norm -f builds the .fai when it loads the FASTA; a header-only VCF is enough.
+  printf '##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n' \
+    | "${FAI_BCFTOOLS}" norm --no-version -f "${FASTA_REF}" -Ov -o /dev/null || true
+  if ! fasta_index_ok; then
+    echo "ERROR: ${FASTA_REF} could not be indexed: it may be incomplete or corrupt." >&2
+    echo "       Delete it and rerun sbatch src/002_data-reference.sh to download it again." >&2
+    exit 1
+  fi
+fi
+
 if [ ! -d "${SHAPEIT5_MAP_DIR}" ] || [ -z "$(ls "${SHAPEIT5_MAP_DIR}"/chr*.b38.gmap.gz 2>/dev/null)" ]; then
   echo "ERROR: SHAPEIT5 map directory not found or empty: ${SHAPEIT5_MAP_DIR}" >&2
   exit 1
