@@ -5,7 +5,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 set -euo pipefail
 trap 'echo "ERROR: Stage-4 pipeline failed on line $LINENO" >&2; exit 1' ERR
@@ -37,7 +37,7 @@ Options:
   --stage3-root <d>    Stage 3 root (default: analysis-root)
   --dest-root <d>      Final output destination (default: from .env)
   --report-dir <d>     Directory for master HTML copies (default: dest-root/report)
-  --partition <name>   Slurm partition (default: low_p)
+  --partition <name>   Slurm partition for Nextflow tasks (default: PARTITION in .env)
   --no-resume          Disable Nextflow -resume
   -h, --help           Show this help
 EOF
@@ -51,25 +51,17 @@ set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 # ── Self-submission ────────────────────────────────────────────────────────────
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-  if ! command -v sbatch >/dev/null 2>&1; then
-    echo "ERROR: sbatch is not available. Submit this script from the HPC login node." >&2; exit 1
-  fi
-  echo "Submitting stage-4 pipeline to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name  "${STAGE4_JOB_NAME:-stage4_finalise}" \
-    --output    "${STAGE4_LOG_OUT:-${PROJ_ROOT}/src/logs/007_stage4_%j.out}" \
-    --error     "${STAGE4_LOG_ERR:-${PROJ_ROOT}/src/logs/007_stage4_%j.err}" \
-    --time      "${STAGE4_TIME:-4:00:00}" \
-    --mem       "${STAGE4_MEM:-16G}" \
-    --cpus-per-task "${STAGE4_CPUS:-2}" \
-    --partition "${STAGE4_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}" "$@"
-  exit 0
-fi
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/007_stage4.sh \
+  --job-name "${STAGE4_JOB_NAME:-stage4_finalise}" \
+  --output "${STAGE4_LOG_OUT:-${PROJ_ROOT}/src/logs/007_stage4_%j.out}" \
+  --error "${STAGE4_LOG_ERR:-${PROJ_ROOT}/src/logs/007_stage4_%j.err}" \
+  --time "${STAGE4_TIME:-4:00:00}" \
+  --mem "${STAGE4_MEM:-16G}" \
+  --cpus-per-task "${STAGE4_CPUS:-2}" \
+  -- "$@"
 
 # ── Inside Slurm job ───────────────────────────────────────────────────────────
 start_time=$(date +%s)
@@ -81,7 +73,7 @@ STAGE2_ROOT="${STAGE4_STAGE2_ROOT:-${ANALYSIS_ROOT}}"
 STAGE3_ROOT="${STAGE4_STAGE3_ROOT:-${ANALYSIS_ROOT}}"
 DEST_ROOT="${STAGE4_DEST_ROOT:-${SCRATCH_RUN}/final}"
 REPORT_DIR="${STAGE4_REPORT_DIR:-${DEST_ROOT}/report}"
-SLURM_PARTITION="${STAGE4_PARTITION:-low_p}"
+SLURM_PARTITION="${PARTITION}"
 WORKDIR="${STAGE4_WORKDIR:-${SCRATCH_RUN}/stage4/work}"
 CONDA_CACHE_DIR="${STAGE4_CONDA_CACHE_DIR:-${SCRATCH_RUN}/stage4/conda}"
 CONDA_SOLVER="${STAGE4_CONDA_SOLVER:-classic}"

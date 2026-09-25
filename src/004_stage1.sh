@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 # Script: src/004_stage1.sh
 # Purpose: Run stage-1 preprocessing for all bespoke dataset scripts in pipeline_stage1/scripts.
@@ -80,28 +80,16 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-
-  if ! command -v sbatch >/dev/null 2>&1; then
-    echo "ERROR: sbatch is not available. Run this script on the HPC login node or submit it with Slurm." >&2
-    exit 1
-  fi
-
-  echo "Submitting Stage-1 processing to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name "${STAGE1_JOB_NAME:-stage1_process}" \
-    --output "${STAGE1_LOG_OUT:-${PROJ_ROOT}/src/logs/003_process_%j.out}" \
-    --error "${STAGE1_LOG_ERR:-${PROJ_ROOT}/src/logs/003_process_%j.err}" \
-    --time "${STAGE1_TIME:-10-00:00:00}" \
-    --mem "${STAGE1_MEM:-32G}" \
-    --cpus-per-task "${STAGE1_CPUS:-2}" \
-    --partition "${STAGE1_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}"
-  exit 0
-fi
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/004_stage1.sh \
+  --job-name "${STAGE1_JOB_NAME:-stage1_process}" \
+  --output "${STAGE1_LOG_OUT:-${PROJ_ROOT}/src/logs/003_process_%j.out}" \
+  --error "${STAGE1_LOG_ERR:-${PROJ_ROOT}/src/logs/003_process_%j.err}" \
+  --time "${STAGE1_TIME:-10-00:00:00}" \
+  --mem "${STAGE1_MEM:-32G}" \
+  --cpus-per-task "${STAGE1_CPUS:-2}"
 
 start_time=$(date +%s)
 
@@ -291,6 +279,7 @@ NF_CMD=(
   --python2_bin "${PYTHON2_BIN}"
   --plink_bin "${PLINK_BIN}"
   --plink2_bin "${PLINK2_BIN}"
+  --slurm_partition "${PARTITION}"
 )
 
 if [ "${RESUME}" = "1" ] && [ "${STAGE1_FORCE}" != "1" ]; then

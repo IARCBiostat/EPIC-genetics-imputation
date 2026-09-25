@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 # Script: src/001_data-genetics.sh
 # Purpose: Copy the raw EPIC genetics data this pipeline needs into ${DATA_ROOT}:
@@ -33,6 +33,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+[ "$CHECK_ONLY" -eq 1 ] || on_partition src/001_data-genetics.sh -- "$@"  # --check runs here
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 # Source locations and layout (see .env). The fallbacks cover an older .env that

@@ -5,7 +5,7 @@
 #SBATCH --time=1:00:00
 #SBATCH --mem=8G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 set -euo pipefail
 trap 'echo "ERROR: Documentation script failed on line $LINENO" >&2; exit 1' ERR
@@ -25,7 +25,7 @@ filesystem is accessible.
 Options:
   --analysis-root <d>  Studies root on scratch (default: from .env)
   --dest-root <d>      Finalised outputs root on scratch (default: from .env)
-  --partition <name>   Slurm partition (default: low_p)
+  --partition <name>   ignored: the job runs on PARTITION from .env
   -h, --help           Show this help
 EOF
 }
@@ -38,25 +38,19 @@ set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 # ── Self-submission ────────────────────────────────────────────────────────────
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-  if ! command -v sbatch >/dev/null 2>&1; then
-    # No Slurm: run directly (e.g. local testing)
-    exec bash "$SCRIPT_PATH" "$@"
-  fi
-  echo "Submitting documentation job to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name  "epic_documentation" \
-    --output    "${PROJ_ROOT}/src/logs/008_documentation_%j.out" \
-    --error     "${PROJ_ROOT}/src/logs/008_documentation_%j.err" \
-    --time      "1:00:00" \
-    --mem       "8G" \
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+# Without Slurm (e.g. local testing) the script simply runs here.
+if command -v sbatch >/dev/null 2>&1; then
+  on_partition src/008_documentation.sh \
+    --job-name "epic_documentation" \
+    --output "${PROJ_ROOT}/src/logs/008_documentation_%j.out" \
+    --error "${PROJ_ROOT}/src/logs/008_documentation_%j.err" \
+    --time "1:00:00" \
+    --mem "8G" \
     --cpus-per-task "2" \
-    --partition "${SLURM_JOB_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}" "$@"
-  exit 0
+    -- "$@"
 fi
 
 # ── Inside Slurm job ───────────────────────────────────────────────────────────

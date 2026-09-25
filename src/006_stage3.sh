@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 set -euo pipefail
 trap 'echo "ERROR: Stage-3 pipeline failed on line $LINENO" >&2; exit 1' ERR
@@ -81,7 +81,7 @@ Options:
   --stage2-root <dir>               Root directory containing analysis/<STUDY>/stage2 outputs
   --dbsnp-vcf <file>                dbSNP GRCh38 VCF for rsID annotation
   --dbsnp-tbi <file>                dbSNP GRCh38 VCF index
-  --partition <name>                Slurm partition for internal Nextflow task submissions
+  --partition <name>                Slurm partition for Nextflow tasks (default: PARTITION in .env)
   --prep-dbsnp-time <duration>            Wall time for PREP_DBSNP_CHROM jobs (default: 72h)
   --prepare-chrom-time <duration>         Wall time for PREPARE_CHROM jobs (default: 72h)
   --import-chrom-time <duration>          Wall time for IMPORT_CHROM jobs (default: 72h)
@@ -114,28 +114,17 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-
-  if ! command -v sbatch >/dev/null 2>&1; then
-    echo "ERROR: sbatch is not available. Submit this script from the HPC login node." >&2
-    exit 1
-  fi
-
-  echo "Submitting stage-3 pipeline to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name "${STAGE3_JOB_NAME:-stage3_postimpute}" \
-    --output "${STAGE3_LOG_OUT:-${PROJ_ROOT}/src/logs/006_stage3_%j.out}" \
-    --error "${STAGE3_LOG_ERR:-${PROJ_ROOT}/src/logs/006_stage3_%j.err}" \
-    --time "${STAGE3_TIME:-10-00:00:00}" \
-    --mem "${STAGE3_MEM:-32G}" \
-    --cpus-per-task "${STAGE3_CPUS:-4}" \
-    --partition "${STAGE3_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}" "$@"
-  exit 0
-fi
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/006_stage3.sh \
+  --job-name "${STAGE3_JOB_NAME:-stage3_postimpute}" \
+  --output "${STAGE3_LOG_OUT:-${PROJ_ROOT}/src/logs/006_stage3_%j.out}" \
+  --error "${STAGE3_LOG_ERR:-${PROJ_ROOT}/src/logs/006_stage3_%j.err}" \
+  --time "${STAGE3_TIME:-10-00:00:00}" \
+  --mem "${STAGE3_MEM:-32G}" \
+  --cpus-per-task "${STAGE3_CPUS:-4}" \
+  -- "$@"
 
 start_time=$(date +%s)
 
@@ -145,7 +134,7 @@ STUDY="${STAGE3_STUDY:-all}"
 OUTDIR="${STAGE3_OUTDIR:-${SCRATCH_RUN}/studies}"
 STAGE1_ROOT="${STAGE3_STAGE1_ROOT:-${SCRATCH_RUN}/studies}"
 STAGE2_ROOT="${STAGE3_STAGE2_ROOT:-${SCRATCH_RUN}/studies}"
-SLURM_PARTITION="${STAGE3_PARTITION:-low_p}"
+SLURM_PARTITION="${PARTITION}"
 PREP_DBSNP_TIME="${STAGE3_PREP_DBSNP_TIME:-72h}"
 PREPARE_CHROM_TIME="${STAGE3_PREPARE_CHROM_TIME:-72h}"
 IMPORT_CHROM_TIME="${STAGE3_IMPORT_CHROM_TIME:-72h}"

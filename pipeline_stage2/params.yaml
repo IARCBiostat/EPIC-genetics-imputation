@@ -2,7 +2,6 @@
 study: "all"
 chromosomes: "all"
 stage1_root: "../analysis"
-slurm_partition: "low_p"
 executor_queue_size: 1000
 
 # General BMRC Imputation Limits

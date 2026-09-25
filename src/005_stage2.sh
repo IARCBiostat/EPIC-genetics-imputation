@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 set -euo pipefail
 trap 'echo "ERROR: Imputation pipeline failed on line $LINENO" >&2; exit 1' ERR
@@ -44,7 +44,7 @@ Options:
   --chromosomes <list>   Comma-separated chromosomes to process (default: all; e.g. 22)
   --out <dir>            Analysis root where <STUDY>/stage2/ will be written
   --stage1-root <dir>    Root directory containing analysis/<STUDY>/stage1 outputs
-  --partition <name>     Slurm partition for internal Nextflow task submissions
+  --partition <name>     Slurm partition for Nextflow tasks (default: PARTITION in .env)
   --queue-size <n>       Nextflow Slurm executor queue size (default: 1000)
   --cache-mode <mode>    Nextflow task cache mode (default: deep)
   --no-empirical-validation
@@ -73,28 +73,17 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-
-  if ! command -v sbatch >/dev/null 2>&1; then
-    echo "ERROR: sbatch is not available. Submit this script from the HPC login node." >&2
-    exit 1
-  fi
-
-  echo "Submitting imputation pipeline to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name "${IMPUTATION_JOB_NAME:-imputation_pipeline}" \
-    --output "${IMPUTATION_LOG_OUT:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.out}" \
-    --error "${IMPUTATION_LOG_ERR:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.err}" \
-    --time "${IMPUTATION_TIME:-10-00:00:00}" \
-    --mem "${IMPUTATION_MEM:-32G}" \
-    --cpus-per-task "${IMPUTATION_CPUS:-4}" \
-    --partition "${IMPUTATION_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}" "$@"
-  exit 0
-fi
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/005_stage2.sh \
+  --job-name "${IMPUTATION_JOB_NAME:-imputation_pipeline}" \
+  --output "${IMPUTATION_LOG_OUT:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.out}" \
+  --error "${IMPUTATION_LOG_ERR:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.err}" \
+  --time "${IMPUTATION_TIME:-10-00:00:00}" \
+  --mem "${IMPUTATION_MEM:-32G}" \
+  --cpus-per-task "${IMPUTATION_CPUS:-4}" \
+  -- "$@"
 
 start_time=$(date +%s)
 
@@ -103,7 +92,7 @@ STUDY="${IMPUTATION_STUDY:-all}"
 CHROMOSOMES="${IMPUTATION_CHROMOSOMES:-all}"
 OUTDIR="${IMPUTATION_OUTDIR:-${SCRATCH_RUN}/studies}"
 STAGE1_ROOT="${IMPUTATION_STAGE1_ROOT:-${SCRATCH_RUN}/studies}"
-SLURM_PARTITION="${IMPUTATION_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
+SLURM_PARTITION="${PARTITION}"
 REF_1000G_DIR="${IMPUTATION_REF_1000G_DIR:-${PROJ_ROOT}/data/reference/1000G}"
 FASTA_REF="${IMPUTATION_FASTA_REF:-${REF_1000G_DIR}/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
 SHAPEIT5_MAP_DIR="${STAGE2_SHAPEIT5_MAP_DIR:-${PROJ_ROOT}/data/reference/shapeit5/maps}"

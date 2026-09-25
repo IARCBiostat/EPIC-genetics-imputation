@@ -5,7 +5,7 @@
 #SBATCH --time=8:00:00
 #SBATCH --mem=8G
 #SBATCH --cpus-per-task=25
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 # Move the finalised study outputs (final/) from scratch to the project root on
 # /data, naming the destination directory after the original run date. The copy
@@ -26,6 +26,10 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: .env not found at ${ENV_FILE}" >&2; exit 1
 fi
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/copy.sh -- "$@"
 
 DELETE_SOURCE=0
 [ "${1:-}" = "--delete-source" ] && DELETE_SOURCE=1

@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 # Script: src/002_data-reference.sh
 # Purpose: Download the public reference data into ${REF_DIR}:
@@ -23,6 +23,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/002_data-reference.sh -- "$@"
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
 # Defaults (if not in .env)

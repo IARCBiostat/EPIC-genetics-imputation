@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=10:00:00
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 # Script: src/000_tools.sh
 # Purpose: Install the host-side tools the pipeline calls outside Nextflow's
@@ -27,6 +27,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/000_tools.sh -- "$@"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "ERROR: conda is not on PATH. Load/initialise conda in the shell you submit from." >&2

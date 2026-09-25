@@ -348,14 +348,14 @@ analysis requires (e.g. `plink2 --pmerge-list`).
 
 ### Prerequisites
 
-- a Slurm cluster with a partition called `low_p`. The partition is set in each script's `#SBATCH` header and in `.env`; change both if your cluster uses a different name
+- a Slurm cluster. Every job and every Nextflow task runs on the partition set by `PARTITION` in `.env` (default `high_p`)
 - `conda` (Miniconda or Miniforge) initialised in the shell you submit jobs from
 - Apptainer available on the compute nodes
 - internet access from the compute nodes: tools and reference data are downloaded, and Nextflow builds its per-process conda environments on first use
 - read access to the EPIC GWAS raw data (`GENETICS_SOURCE_ROOT`): `1_Raw_Data/data/` (study genotypes and chip manifests), `1_Raw_Data/Reference/Epic/Subj_Id_2015.txt`, and `Central_Genetics/*.sas7bdat`
 - space for the input data: by default steps 2–3 copy the raw genotypes and download the reference panel and dbSNP (tens of GB) into `data/` inside the clone, so clone onto a large project filesystem (not a quota-limited home directory), or point `DATA_ROOT` and `TOOLS_DIR` in `.env` elsewhere
 
-Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`.
+Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`. Each job script can be started with `sbatch src/<script>` or `bash src/<script>`: either way it runs on `PARTITION` from `.env` (a job that Slurm starts on another partition resubmits itself there).
 
 ### Fixed software versions
 
@@ -382,7 +382,7 @@ The repository ships a `.env` with placeholder values. Edit the three values und
 | `GENETICS_SOURCE_ROOT` | the EPIC GWAS folder holding the raw data: the folder that contains `1_Raw_Data/` and `Central_Genetics/` (layout below) |
 | `SCRATCH_DATE` | a label for this run, e.g. `2026-09-24` |
 
-Two site defaults sit just below: `APPTAINER_BINDPATH="/data:/data"` (host paths Apptainer mounts) and `SCRATCH="/scratch/${USER}/epic-genetics"` (where outputs and Nextflow work directories go). Change them only if your cluster differs.
+Three site defaults sit just below: `APPTAINER_BINDPATH="/data:/data"` (host paths Apptainer mounts), `SCRATCH="/scratch/${USER}/epic-genetics"` (where outputs and Nextflow work directories go) and `PARTITION="high_p"` (the Slurm partition for every job and Nextflow task). Change them only if your cluster differs.
 
 To update the pipeline later, just run `git pull`: it never changes your edited `.env`, because the repository copy of `.env` is kept fixed. (Maintainers: never commit changes to `.env`. Give any new setting a default in the scripts instead, and don't commit your own edited `.env`.)
 
@@ -518,7 +518,7 @@ sbatch src/006_stage3.sh --related true --ancestry true
 | Phasing | SHAPEIT5 phases each study chromosome against the matching reference chromosome | `phase_cpus = 4`; uses SHAPEIT5 genetic recombination map | chrX is phased block by block as `PAR1`, `nonPAR`, `PAR2`; SHAPEIT5 outputs BCF which is converted to VCF.gz |
 | Imputation | Minimac4 imputes each phased chromosome against the matching `msav` reference panel | `min_r2 = 0.3`; `minimac_batch_size = 200`; `minimac_threads = 4` | Final stage-2 VCFs retain imputation INFO metrics including `R2` |
 | chrX handling | chrX is processed separately from autosomes | Blocks: `PAR1`, `nonPAR`, `PAR2`; block is skipped if no overlap or too few target variants exist; `chrx_min_ratio = 0.0` | Successful chrX blocks are concatenated; empty chrX output is written if none survive |
-| Task runtime / retries | Internal stage-2 tasks are submitted to Slurm through Nextflow | Partition `low_p`; retries for exit codes `137`, `140`, `143`; `maxRetries = 2`; `errorStrategy = finish` | Tolerates interruption-style failures without masking real data errors; REPORTING retried up to 2 times for transient NFS errors |
+| Task runtime / retries | Internal stage-2 tasks are submitted to Slurm through Nextflow | Partition from `PARTITION` in `.env`; retries for exit codes `137`, `140`, `143`; `maxRetries = 2`; `errorStrategy = finish` | Tolerates interruption-style failures without masking real data errors; REPORTING retried up to 2 times for transient NFS errors |
 
 ### Stage 3
 
