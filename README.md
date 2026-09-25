@@ -357,6 +357,16 @@ analysis requires (e.g. `plink2 --pmerge-list`).
 
 Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`.
 
+### Fixed software versions
+
+All software is pinned to the versions of the June 2026 run, so a fresh clone reproduces it with no manual changes:
+
+- every conda environment is created from a lock file (`*.lock.txt` next to each environment `.yml`) that lists each package by exact file, including indirect dependencies. Nothing is re-solved, so later package releases cannot change what runs. This covers the Nextflow tasks of stages 2–4 and the `nf_EPIC-genetics` (including Nextflow itself), Python 2.7, plink2 and R environments created in step 1
+- compiled htslib/bcftools, the Apptainer images and triple-liftOver are pinned by version, tag and commit in `src/000_tools.sh`
+- reference data are fixed: the 1000 Genomes 2022 panel, the GRCh38 no-alt FASTA, the SHAPEIT5 genetic maps (pinned commit and checksum) and dbSNP build 157 (NCBI archive, md5-checked)
+
+Maintainers: to change an environment deliberately, edit its `.yml`, regenerate its lock with `python3 src/misc/make_env_locks.py` (needs [pixi](https://pixi.sh)), and re-validate a run. `src/misc/export_env_locks.sh` records the exact software of any finished run.
+
 ### 0: clone and configure `.env`
 
 ```bash
@@ -383,13 +393,13 @@ By default, tools are installed to `${GENETICS_PROJECT_ROOT}/tools`, and input d
 
 ### 1: install environments and tools
 
-Create the `nf_EPIC-genetics` conda environment (Nextflow, Java, Python 3, R) and the Python 2.7 environment used by the legacy stage-1 scripts (at `${GENETICS_PROJECT_ROOT}/.conda/py27`):
+Create the `nf_EPIC-genetics` conda environment (Nextflow, Java, Python 3, R) and the Python 2.7 environment used by the legacy stage-1 scripts (at `${GENETICS_PROJECT_ROOT}/.conda/py27`), both from their lock files in `envs/`. Rerunning it skips environments that are already up to date:
 
 ```bash
 bash src/000_env.sh
 ```
 
-Install the tools that run outside Nextflow's per-process conda environments. That is htslib/bcftools (compiled), plink 1.9, SHAPEIT5 and UCSC liftOver (Apptainer images), plink2 2.0.0-a.6.9 (its own conda environment in `tools/envs/plink2`; stage 1 needs this version or later), R (conda), and [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) with its chain files. This runs as a job because compiling takes a while:
+Install the tools that run outside Nextflow's per-process conda environments. That is htslib/bcftools (compiled), plink 1.9, SHAPEIT5 and UCSC liftOver (Apptainer images), plink2 2.0.0-a.6.9 and R (conda environments in `tools/envs/`, from lock files), and [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) with its chain files. This runs as a job because compiling takes a while:
 
 ```bash
 sbatch src/000_tools.sh

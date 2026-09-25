@@ -12,7 +12,7 @@
 # per-process conda environments, into ${TOOLS_DIR} (wrappers in ${TOOLS_DIR}/bin):
 #   - htslib (bgzip, tabix) and bcftools, compiled from source
 #   - plink 1.9, SHAPEIT5 and UCSC liftOver, as Apptainer images
-#   - plink2 (pinned, in its own conda environment) and R (conda)
+#   - plink2 and R, in conda environments built from envs/*.lock.txt
 #   - triple-liftOver (stage-1 liftover to hg38), from GitHub at a pinned commit
 # Submit from the repository root: sbatch src/000_tools.sh
 
@@ -32,19 +32,22 @@ if ! command -v conda >/dev/null 2>&1; then
   echo "ERROR: conda is not on PATH. Load/initialise conda in the shell you submit from." >&2
   exit 1
 fi
-CONDA_BASE="$(conda info --base)"
+CONDA_CMD="conda"
+if command -v mamba >/dev/null 2>&1; then
+    CONDA_CMD="mamba"
+fi
 
 IMG_DIR="${TOOLS_DIR}/singularity_images"
 BIN_DIR="${TOOLS_DIR}/bin"
 SRC_DIR="${TOOLS_DIR}/src"
 RPATH_FLAGS="-Wl,-rpath,${TOOLS_DIR}/lib -Wl,-rpath,${TOOLS_DIR}/lib64"
-RENV_NAME="renv"
-RENV_PATH="${CONDA_BASE}/envs/${RENV_NAME}"
-# plink2 gets its own pinned environment inside TOOLS_DIR: stage-1 and stage-3 QC need
-# --king-cutoff-table (added 24 Jun 2024; bioconda 2.0.0a.6.9 is built 29 Jan 2025), and
-# a shared or pre-existing env can leave an older plink2 in place.
-PLINK2_VERSION="2.0.0a.6.9"
+# Conda environments live inside TOOLS_DIR and are created from the repository's lock
+# files (envs/*.lock.txt: exact packages of the June 2026 run), so they cannot clash
+# with, or be satisfied by, an unrelated environment of the same name.
+LOCK_DIR="$(dirname "$ENV_FILE")/envs"
+# plink2 2.0.0-a.6.9: stage-1 and stage-3 QC need --king-cutoff-table (added 24 Jun 2024).
 PLINK2_ENV="${TOOLS_DIR}/envs/plink2"
+R_ENV="${TOOLS_DIR}/envs/r"
 
 # True when the given plink2 recognises --king-cutoff-table.
 plink2_has_king_cutoff_table() {
@@ -52,7 +55,32 @@ plink2_has_king_cutoff_table() {
     out="$("$1" --king-cutoff-table 2>&1 || true)"
     [[ "$out" == *"--king-cutoff-table requires"* ]]
 }
-CONDA_BIN="${CONDA_BASE}/bin"
+
+# Create the environment at <prefix> from <lock> (explicit package URLs: no solving,
+# no channels). Skipped if it was already built from this exact lock.
+env_from_lock() {
+    local prefix="$1" lock="$2" stamp want
+    stamp="${prefix}/.epic_lock.md5"
+    want="$(md5sum "$lock" | cut -d' ' -f1)"
+    if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        echo "  ✓ ${prefix} (matches $(basename "$lock"))"
+        return 0
+    fi
+    if [ -e "$prefix" ]; then
+        if [ ! -d "${prefix}/conda-meta" ]; then
+            echo "  ✗ FAILED: ${prefix} exists but is not a conda environment; move it out of the way."
+            FAILURES=$((FAILURES + 1))
+            return 0
+        fi
+        echo "  Rebuilding ${prefix} from $(basename "$lock")..."
+        rm -rf "$prefix"
+    else
+        echo "  Creating ${prefix} from $(basename "$lock")..."
+    fi
+    mkdir -p "$(dirname "$prefix")"
+    $CONDA_CMD create -y -p "$prefix" --file "$lock"
+    echo "$want" > "$stamp"
+}
 TRIPLE_LIFTOVER_DIR="${TRIPLE_LIFTOVER_DIR:-${TOOLS_DIR}/triple-liftOver}"
 
 mkdir -p "$TOOLS_DIR" "$IMG_DIR" "$BIN_DIR" "$SRC_DIR"
@@ -204,58 +232,16 @@ fi
 
 # ── 5. Conda environments (plink2, R) ─────────────────────────────────────────
 echo ""
-echo "[5/6] Installing plink2 and R packages..."
+echo "[5/6] Installing plink2 and R from lock files..."
 FAILURES=0
 
-# 5a. plink2, pinned, in its own environment (recreated if missing or too old)
-if [ -x "${PLINK2_ENV}/bin/plink2" ] && plink2_has_king_cutoff_table "${PLINK2_ENV}/bin/plink2"; then
-    echo "  ✓ plink2 (already installed: $("${PLINK2_ENV}/bin/plink2" --version | head -1))"
-else
-    echo "  Creating plink2 ${PLINK2_VERSION} environment at ${PLINK2_ENV}..."
-    mkdir -p "$(dirname "${PLINK2_ENV}")"
-    "${CONDA_BIN}/conda" create -y -p "${PLINK2_ENV}" --override-channels -c conda-forge -c bioconda \
-        "plink2=${PLINK2_VERSION}"
-    if [ -x "${PLINK2_ENV}/bin/plink2" ]; then
-        echo "  ✓ plink2 ($("${PLINK2_ENV}/bin/plink2" --version | head -1))"
-    else
-        echo "  ✗ FAILED: plink2 environment creation failed"
-        FAILURES=$((FAILURES + 1))
-    fi
-fi
+env_from_lock "${PLINK2_ENV}" "${LOCK_DIR}/plink2.lock.txt"
+env_from_lock "${R_ENV}" "${LOCK_DIR}/r.lock.txt"
 
-# 5b. R. miniconda's R Makeconf hardcodes /opt/rh/devtoolset-8 (CentOS compiler, absent on Ubuntu).
-# install.packages() compilation always fails. Fix: dedicated conda env with pre-built
-# conda-forge R packages — no compilation involved at all.
-
-if [ ! -d "${RENV_PATH}" ]; then
-    echo "  Creating conda R environment (r-base + r-haven + r-tidyverse)..."
-    "${CONDA_BIN}/conda" create -y -n "${RENV_NAME}" --override-channels -c conda-forge \
-        r-base r-haven r-tidyverse
-    if [ ! -x "${RENV_PATH}/bin/Rscript" ]; then
-        echo "  ✗ FAILED: conda renv creation failed"
-        FAILURES=$((FAILURES + 1))
-    else
-        echo "  ✓ conda renv (r-base + r-haven + r-tidyverse)"
-    fi
-else
-    if "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
-        echo "  ✓ conda renv (already set up, haven available)"
-    else
-        echo "  Adding r-haven to existing renv..."
-        "${CONDA_BIN}/conda" install -y -n "${RENV_NAME}" --override-channels -c conda-forge r-haven r-tidyverse
-        if ! "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
-            echo "  ✗ FAILED: r-haven not available in renv after install"
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "  ✓ r-haven added to renv"
-        fi
-    fi
-fi
-
-# Wrapper so scripts using Rscript from BIN_DIR pick up the renv automatically
+# Wrapper so scripts using Rscript from BIN_DIR pick up the R environment
 cat > "${BIN_DIR}/Rscript" << EOF
 #!/bin/bash
-exec "${RENV_PATH}/bin/Rscript" "\$@"
+exec "${R_ENV}/bin/Rscript" "\$@"
 EOF
 chmod +x "${BIN_DIR}/Rscript"
 

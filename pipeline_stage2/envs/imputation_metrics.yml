@@ -1,3 +1,6 @@
+# Software as used in the June 2026 run. Nextflow creates this environment from the
+# matching .lock.txt: these specs solved as of 2026-06-17, exact linux-64 packages.
+# After editing, regenerate the lock with src/misc/make_env_locks.py.
 name: imputation-metrics
 channels:
   - conda-forge

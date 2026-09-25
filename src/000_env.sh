@@ -4,7 +4,10 @@
 #   1. nf_EPIC-genetics: Nextflow + Java, Python 3 (with pandas/matplotlib for the
 #      stage-1/3 report figures), and R + haven for 003_data-epic.
 #   2. Python 2.7 at ${PYTHON2_ENV} for the legacy stage-1 preprocessing scripts.
-# Run from the repository root after creating .env: bash src/000_env.sh
+# Both are created from lock files (envs/*.lock.txt: exact packages of the June 2026
+# run), so every setup gets identical software. Rerunning skips an environment that
+# already matches its lock and rebuilds it if the lock has changed.
+# Run from the repository root after editing .env: bash src/000_env.sh
 
 set -euo pipefail
 
@@ -31,8 +34,8 @@ echo "=========================================="
 echo " Setting up EPIC Genetics Nextflow Environment"
 echo "=========================================="
 
-if ! command -v conda >/dev/null 2>&1 && ! command -v mamba >/dev/null 2>&1; then
-    echo "ERROR: Neither conda nor mamba is available in your PATH."
+if ! command -v conda >/dev/null 2>&1; then
+    echo "ERROR: conda is not available in your PATH."
     exit 1
 fi
 
@@ -41,19 +44,33 @@ if command -v mamba >/dev/null 2>&1; then
     CONDA_CMD="mamba"
 fi
 
-# --override-channels keeps the Anaconda 'defaults' channel (and its terms-of-service
-# prompt) out of the solve; everything needed is on conda-forge/bioconda.
-echo "Creating environment '${ENV_NAME}'..."
-$CONDA_CMD create -n ${ENV_NAME} --override-channels -c conda-forge -c bioconda \
-    nextflow openjdk=21 python=3.9 pandas matplotlib-base r-base r-haven -y
+# Create the environment at <prefix> from <lock> (explicit package URLs: no solving,
+# no channels). Skipped if it was already built from this exact lock.
+env_from_lock() {
+    local prefix="$1" lock="$2" stamp want
+    stamp="${prefix}/.epic_lock.md5"
+    want="$(md5sum "$lock" | cut -d' ' -f1)"
+    if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        echo "  ✓ ${prefix} (matches $(basename "$lock"))"
+        return 0
+    fi
+    if [ -e "$prefix" ]; then
+        if [ ! -d "${prefix}/conda-meta" ]; then
+            echo "ERROR: ${prefix} exists but is not a conda environment; move it out of the way." >&2
+            exit 1
+        fi
+        echo "  Rebuilding ${prefix} from $(basename "$lock")..."
+        rm -rf "$prefix"
+    else
+        echo "  Creating ${prefix} from $(basename "$lock")..."
+    fi
+    $CONDA_CMD create -y -p "$prefix" --file "$lock"
+    echo "$want" > "$stamp"
+}
 
+env_from_lock "$(conda info --base)/envs/${ENV_NAME}" "${REPO_DIR}/envs/nf_EPIC-genetics.lock.txt"
 echo ""
-if [ -x "${PYTHON2_ENV}/bin/python2.7" ]; then
-    echo "Python 2.7 environment already present at ${PYTHON2_ENV}"
-else
-    echo "Creating Python 2.7 environment at ${PYTHON2_ENV}..."
-    $CONDA_CMD create -p "${PYTHON2_ENV}" --override-channels -c conda-forge python=2.7 -y
-fi
+env_from_lock "${PYTHON2_ENV}" "${REPO_DIR}/envs/py27.lock.txt"
 "${PYTHON2_ENV}/bin/python2.7" --version
 
 echo "=========================================="

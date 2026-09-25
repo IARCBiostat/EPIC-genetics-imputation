@@ -221,37 +221,14 @@ else
     PLINK_BIN="${PLINK_BIN:-plink}"
 fi
 export PLINK_BIN
+# Each task runs in its own conda environment (created from envs/*.lock.txt), which
+# Nextflow puts first on the task's PATH, so these names resolve to that environment's
+# pinned tools. Do not resolve absolute paths from the conda cache here: that picked
+# whichever environment was found first, so reruns mixed tool versions across tasks.
 export BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 export SHAPEIT5_COMMON_BIN="${SHAPEIT5_COMMON_BIN:-SHAPEIT5_phase_common}"
-# Resolve tool binaries to full paths from the Nextflow conda cache so SLURM
-# workers don't need conda activation to find them.
-_shapeit5_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "SHAPEIT5_phase_common" -type f 2>/dev/null | head -1) || true
-if [ -n "${_shapeit5_bin}" ] && [ -x "${_shapeit5_bin}" ]; then
-    export SHAPEIT5_COMMON_BIN="${_shapeit5_bin}"
-fi
-unset _shapeit5_bin
-
-_bcftools_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "bcftools" \( -type f -o -type l \) 2>/dev/null | head -1) || true
-if [ -n "${_bcftools_bin}" ] && [ -x "${_bcftools_bin}" ]; then
-    export BCFTOOLS_BIN="${_bcftools_bin}"
-fi
-unset _bcftools_bin
 export MINIMAC4_BIN="${MINIMAC4_BIN:-minimac4}"
-_minimac4_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "minimac4" \( -type f -o -type l \) 2>/dev/null | head -1) || true
-if [ -n "${_minimac4_bin}" ] && [ -x "${_minimac4_bin}" ]; then
-    export MINIMAC4_BIN="${_minimac4_bin}"
-fi
-unset _minimac4_bin
 export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
-# Resolve to a Python 3.10+ that has pandas+matplotlib (needed by REPORTING).
-_python3_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 4 -name "python3" 2>/dev/null | while IFS= read -r _p; do
-    [ -x "${_p}" ] || continue
-    "${_p}" -c "import pandas, matplotlib, sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null && printf '%s\n' "${_p}" && break
-done) || true
-if [ -n "${_python3_bin}" ] && [ -x "${_python3_bin}" ]; then
-    export PYTHON3_BIN="${_python3_bin}"
-fi
-unset _python3_bin
 
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
 conda activate nf_EPIC-genetics || true

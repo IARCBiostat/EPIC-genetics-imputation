@@ -77,34 +77,45 @@ if [ ! -f "${FASTA}" ]; then
 fi
 
 # 1c. SHAPEIT5 per-chromosome genetic maps (GRCh38)
-# Source: odelaneau/shapeit resources/maps/b38
+# Source: odelaneau/shapeit resources/maps/b38, pinned to a commit and checksum so the
+# maps cannot change under the pipeline.
 SHAPEIT5_MAP_DIR="${REF_DIR}/shapeit5/maps"
-SHAPEIT5_MAP_TAR_URL="https://github.com/odelaneau/shapeit/raw/main/resources/maps/b38/genetic_maps.b38.tar.gz"
+SHAPEIT5_MAP_COMMIT="f9d726472df3f26120fe738a137fc41cbcc0bbf4"
+SHAPEIT5_MAP_SHA256="04f97acc6524d75e1dbc397e72cf6776b2f1e33f72a06ee477ef69359a97c69e"
+SHAPEIT5_MAP_TAR_URL="https://raw.githubusercontent.com/odelaneau/shapeit/${SHAPEIT5_MAP_COMMIT}/resources/maps/b38/genetic_maps.b38.tar.gz"
 if [ -z "$(ls "${SHAPEIT5_MAP_DIR}"/chr*.b38.gmap.gz 2>/dev/null)" ]; then
     echo "Downloading SHAPEIT5 GRCh38 genetic maps..."
-    curl -fsSL "${SHAPEIT5_MAP_TAR_URL}" | tar -xz -C "${SHAPEIT5_MAP_DIR}"
+    MAP_TAR="${SHAPEIT5_MAP_DIR}/genetic_maps.b38.tar.gz"
+    fetch "${SHAPEIT5_MAP_TAR_URL}" "${MAP_TAR}"
+    if [ "$(sha256sum "${MAP_TAR}" | cut -d' ' -f1)" != "${SHAPEIT5_MAP_SHA256}" ]; then
+        echo "ERROR: SHAPEIT5 genetic maps checksum mismatch (${MAP_TAR})" >&2
+        exit 1
+    fi
+    tar -xzf "${MAP_TAR}" -C "${SHAPEIT5_MAP_DIR}"
+    rm -f "${MAP_TAR}"
     echo "  ✓ SHAPEIT5 genetic maps"
 else
     echo "  ✓ SHAPEIT5 genetic maps (already downloaded)"
 fi
 
 # 1d. dbSNP GRCh38 VCF for rsID annotation
-# Source: NCBI dbSNP latest_release VCF directory.
-# We auto-detect the current GRCh38 assembly file matching GCF_000001405.*.gz.
-DBSNP_VCF_DIR_URL="https://ftp.ncbi.nlm.nih.gov/snp/latest_release/VCF/"
-DBSNP_FILENAME=""
-
-echo "Resolving latest dbSNP GRCh38 VCF..."
-DBSNP_FILENAME="$(curl -fsSL "${DBSNP_VCF_DIR_URL}" 2>/dev/null | tr '"' '\n' | grep -E '^GCF_000001405\.[0-9]+\.gz$' | sort -V | tail -n 1 || true)"
-if [ -z "${DBSNP_FILENAME}" ]; then
-    echo "  Warning: Could not parse latest dbSNP VCF listing; falling back to GCF_000001405.40.gz"
-    DBSNP_FILENAME="GCF_000001405.40.gz"
-fi
+# Pinned to dbSNP build 157 (the build the June 2026 run annotated with; identical to
+# NCBI's latest_release since 15 Jan 2025), from NCBI's permanent archive so rsIDs do
+# not change when NCBI publishes a new build. Checked against NCBI's md5.
+DBSNP_BUILD="157"
+DBSNP_FILENAME="GCF_000001405.40.gz"
+DBSNP_VCF_DIR_URL="https://ftp.ncbi.nlm.nih.gov/snp/archive/b${DBSNP_BUILD}/VCF"
 
 DBSNP_DEST="${REF_DIR}/dbsnp/${DBSNP_FILENAME}"
 if [ ! -f "${DBSNP_DEST}" ]; then
-    echo "Downloading dbSNP GRCh38 VCF (${DBSNP_FILENAME})..."
-    fetch "${DBSNP_VCF_DIR_URL}/${DBSNP_FILENAME}" "${DBSNP_DEST}"
+    echo "Downloading dbSNP build ${DBSNP_BUILD} GRCh38 VCF (${DBSNP_FILENAME}, ~28 GB)..."
+    curl -fsSL "${DBSNP_VCF_DIR_URL}/${DBSNP_FILENAME}" -o "${DBSNP_DEST}.part"
+    want_md5="$(curl -fsSL "${DBSNP_VCF_DIR_URL}/${DBSNP_FILENAME}.md5" | cut -c1-32)"
+    if [ "$(md5sum "${DBSNP_DEST}.part" | cut -d' ' -f1)" != "${want_md5}" ]; then
+        echo "ERROR: dbSNP download failed its md5 check; delete ${DBSNP_DEST}.part and rerun." >&2
+        exit 1
+    fi
+    mv "${DBSNP_DEST}.part" "${DBSNP_DEST}"
 fi
 if [ ! -f "${DBSNP_DEST}.tbi" ]; then
     echo "Downloading dbSNP GRCh38 VCF index..."
