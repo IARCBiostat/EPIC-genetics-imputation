@@ -352,7 +352,10 @@ fi
 if command -v conda >/dev/null 2>&1; then
   CONDA_BASE="$(conda info --base)"
   export CONDA_BASE
-  export PATH="${CONDA_BASE}/bin:${CONDA_BASE}/condabin:${PATH}"
+  # Nextflow needs the conda command (condabin) to create and activate task environments.
+  # Never put ${CONDA_BASE}/bin first: anything installed in the conda base environment
+  # (e.g. an old plink2) would then shadow the pinned tools of every task environment.
+  export PATH="${CONDA_BASE}/condabin:${PATH}"
 fi
 
 if [ ! -d "${PIPELINE_DIR}" ]; then

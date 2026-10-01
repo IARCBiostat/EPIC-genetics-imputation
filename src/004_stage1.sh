@@ -125,7 +125,10 @@ if command -v conda >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   source "${CONDA_BASE}/etc/profile.d/conda.sh" || true
   conda activate nf_EPIC-genetics || true
-  export PATH="${CONDA_BASE}/bin:${CONDA_BASE}/condabin:${PATH}"
+  # Nextflow needs the conda command (condabin) to create and activate task environments.
+  # Never put ${CONDA_BASE}/bin first: anything installed in the conda base environment
+  # (e.g. an old plink2) would then shadow the pinned tools of every task environment.
+  export PATH="${CONDA_BASE}/condabin:${PATH}"
 fi
 
 if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/java" ]; then
