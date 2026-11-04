@@ -67,9 +67,9 @@ def main() -> None:
         study_dir,
     )
 
-    # The raw PED/MAP uses compact Idepic format (e.g. 21_21000373) while the
+    # The raw PED/MAP uses compact Idepic format (e.g. 00_00000001) while the
     # shared EPIC case-status file uses the padded Idepic_Bio format
-    # (e.g. 21____21000373, always 14 chars).  Remap IIDs and FIDs here so that
+    # (e.g. 00____00000001, always 14 chars).  Remap IIDs and FIDs here so that
     # apply_epic_sample_metadata can match against the case-status file.
     id_update_path = trace / f'{PREFIX}_id_update.txt'
     remapped_prefix = trace / f'{PREFIX}_remapped'
@@ -77,7 +77,7 @@ def main() -> None:
         for line in base_prefix.with_suffix('.fam').read_text().splitlines():
             parts = line.split()
             fid, iid = parts[0], parts[1]
-            # 21_21000373 → 21____21000373  (replace single _ with ____)
+            # 00_00000001 → 00____00000001  (replace single _ with ____)
             def _pad(id_str: str) -> str:
                 if id_str.count('_') == 1:
                     return id_str.replace('_', '____', 1)
@@ -95,8 +95,8 @@ def main() -> None:
             "\n*************************** Neuro_01 Stage 1 *******************************\n"
             "Using the delivered before-QC PED/MAP dataset as the stage-1 input.\n"
             "Converted the PED/MAP delivery to a PLINK binary dataset before stage-1 processing.\n"
-            "Raw PED/MAP IDs use compact Idepic format (e.g. 21_21000373); remapped to padded\n"
-            "Idepic_Bio format (21____21000373) so EPIC case-status metadata can be applied.\n"
+            "Raw PED/MAP IDs use compact Idepic format (e.g. 00_00000001); remapped to padded\n"
+            "Idepic_Bio format (00____00000001) so EPIC case-status metadata can be applied.\n"
             f"Assumed source build: {args.build}\n\n"
         ),
         'w',
