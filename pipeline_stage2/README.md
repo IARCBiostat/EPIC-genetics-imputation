@@ -1,5 +1,7 @@
 # pipeline_stage2
 
+> Paths written as `analysis/<STUDY>/...` are relative to the analysis root, which the `src/` submission scripts set to `${SCRATCH}/${SCRATCH_DATE}/studies/` from `.env`. Setup and run order are in the [top-level README](../README.md#how-to-run).
+
 Stage 2 converts the stage-1 hg38 PLINK handoff into phased and imputed per-chromosome VCF outputs.
 
 This stage consumes `analysis/<STUDY>/stage1/` outputs and writes the final imputed files to `analysis/<STUDY>/stage2/`. Temporary Nextflow work files are written under `pipeline_stage2/work/`.

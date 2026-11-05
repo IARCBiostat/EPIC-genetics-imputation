@@ -1,5 +1,7 @@
 # pipeline_stage3
 
+> Paths written as `analysis/<STUDY>/...` are relative to the analysis root, which the `src/` submission scripts set to `${SCRATCH}/${SCRATCH_DATE}/studies/` from `.env`. Setup and run order are in the [top-level README](../README.md#how-to-run).
+
 Stage 3 performs post-imputation QC and converts the final study outputs into PLINK2 format.
 
 This stage consumes stage-2 imputed VCFs from `analysis/<STUDY>/stage2/`, annotates rsIDs from dbSNP GRCh38, filters variants, merges chromosomes, performs sample QC, and writes the final study-level PLINK2 dataset to `analysis/<STUDY>/stage3/final/`.
@@ -11,7 +13,7 @@ Stage 3 inputs are:
 - `analysis/<STUDY>/stage1/` (Original FAM files)
 - dbSNP GRCh38 VCF + index
 
-Stage 3 produces a finalized, analysis-ready dataset and a Stage 3-only report. Cross-stage master reports are generated separately with `src/007_report.sh`.
+Stage 3 produces a finalized, analysis-ready dataset and a Stage 3-only report. Cross-stage master reports are generated separately with `src/007_stage4.sh`.
 
 Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
 - **`final/`**: The definitive, QC-passed PLINK2 files.
@@ -21,7 +23,7 @@ Results are organized into a strict hierarchy under `analysis/<STUDY>/stage3/`:
 
 ## 2. How To Run Stage 3
 
-Full run (HWE filtering and ancestry outlier exclusion are both enabled by default):
+Full run (HWE filtering is enabled by default; related-sample and ancestry-outlier exclusion are off):
 ```bash
 sbatch src/006_stage3.sh
 ```
@@ -31,9 +33,9 @@ To run a specific study:
 sbatch src/006_stage3.sh --study Glbd_01
 ```
 
-To retain ancestry outliers in the final dataset (detection still runs):
+Related samples and ancestry outliers are always identified but are kept in the final dataset by default (`related: false`, `ancestry: false` in `params.yaml`). To remove them:
 ```bash
-sbatch src/006_stage3.sh --no-exclude-ancestry-outliers
+sbatch src/006_stage3.sh --related true --ancestry true
 ```
 
 Large intermediate PLINK/PGEN/BED files are not copied into `analysis/` by default. To publish them for debugging or handoff:
@@ -217,7 +219,7 @@ Stage 3 always identifies ancestry outliers regardless of whether they will be e
 The detection and exclusion steps are deliberately separated:
 
 - ancestry outlier detection always runs and produces the PCA plot and outlier list
-- ancestry outlier removal is enabled by default (`exclude_ancestry_outliers: true`); pass `--no-exclude-ancestry-outliers` to retain all samples in the final dataset
+- ancestry outlier removal is off by default (`ancestry: false` in `params.yaml`); pass `--ancestry true` to remove them from the final dataset
 
 This design preserves a complete ancestry-QC record even in analyses that intentionally retain the full sample set.
 
@@ -225,13 +227,14 @@ This design preserves a complete ancestry-QC record even in analyses that intent
 
 The removal list always includes:
 
-- sex mismatches
 - heterozygosity outliers
-- related samples
 
-It also includes ancestry outliers by default. Pass `--no-exclude-ancestry-outliers` to omit them:
+It also includes, when enabled:
 
-- ancestry outliers included unless `--no-exclude-ancestry-outliers` is specified
+- related samples, with `--related true` (default: off; always listed in `<STUDY>.related.exclude`)
+- ancestry outliers, with `--ancestry true` (default: off; always listed in `<STUDY>.ancestry.exclude`)
+
+Sex mismatches are removed earlier, in the stage-1 pre-phasing QC.
 
 This list is written to:
 
@@ -253,7 +256,7 @@ The final published outputs are:
 
 Stage 3 creates a Stage 3-only report at `analysis/<STUDY>/stage3/report/report-stage3.html`.
 This report covers post-imputation filtering and sample review only.
-Cross-stage master reports are generated separately with `src/007_report.sh`.
+Cross-stage master reports are generated separately with `src/007_stage4.sh`.
 
 ### 4.1 Report Contents
 The Stage 3 report tracks:

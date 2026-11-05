@@ -5,7 +5,16 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=10:00:00
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
+
+# Script: src/000_tools.sh
+# Purpose: Install the host-side tools the pipeline calls outside Nextflow's
+# per-process conda environments, into ${TOOLS_DIR} (wrappers in ${TOOLS_DIR}/bin):
+#   - htslib (bgzip, tabix) and bcftools, compiled from source
+#   - plink 1.9, SHAPEIT5 and UCSC liftOver, as Apptainer images
+#   - plink2 and R, in conda environments built from envs/*.lock.txt
+#   - triple-liftOver (stage-1 liftover to hg38), from GitHub at a pinned commit
+# Submit from the repository root: sbatch src/000_tools.sh
 
 set -euo pipefail
 trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
@@ -18,16 +27,67 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/000_tools.sh -- "$@"
+
+if ! command -v conda >/dev/null 2>&1; then
+  echo "ERROR: conda is not on PATH. Load/initialise conda in the shell you submit from." >&2
+  exit 1
+fi
+CONDA_CMD="conda"
+if command -v mamba >/dev/null 2>&1; then
+    CONDA_CMD="mamba"
+fi
 
 IMG_DIR="${TOOLS_DIR}/singularity_images"
 BIN_DIR="${TOOLS_DIR}/bin"
 SRC_DIR="${TOOLS_DIR}/src"
 RPATH_FLAGS="-Wl,-rpath,${TOOLS_DIR}/lib -Wl,-rpath,${TOOLS_DIR}/lib64"
-RENV_NAME="renv"
-RENV_PATH="${HOME}/miniconda3/envs/${RENV_NAME}"
-CONDA_BIN="${HOME}/miniconda3/bin"
+# Conda environments live inside TOOLS_DIR and are created from the repository's lock
+# files (envs/*.lock.txt: exact packages of the June 2026 run), so they cannot clash
+# with, or be satisfied by, an unrelated environment of the same name.
+LOCK_DIR="$(dirname "$ENV_FILE")/envs"
+# plink2 2.0.0-a.6.9: stage-1 and stage-3 QC need --king-cutoff-table (added 24 Jun 2024).
+PLINK2_ENV="${TOOLS_DIR}/envs/plink2"
+R_ENV="${TOOLS_DIR}/envs/r"
 
-mkdir -p "$TOOLS_DIR" "$IMG_DIR" "$BIN_DIR" "$SRC_DIR" logs
+# True when the given plink2 recognises --king-cutoff-table.
+plink2_has_king_cutoff_table() {
+    local out
+    out="$("$1" --king-cutoff-table 2>&1 || true)"
+    [[ "$out" == *"--king-cutoff-table requires"* ]]
+}
+
+# Create the environment at <prefix> from <lock> (explicit package URLs: no solving,
+# no channels). Skipped if it was already built from this exact lock.
+env_from_lock() {
+    local prefix="$1" lock="$2" stamp want
+    stamp="${prefix}/.epic_lock.md5"
+    want="$(md5sum "$lock" | cut -d' ' -f1)"
+    if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        echo "  ✓ ${prefix} (matches $(basename "$lock"))"
+        return 0
+    fi
+    if [ -e "$prefix" ]; then
+        if [ ! -d "${prefix}/conda-meta" ]; then
+            echo "  ✗ FAILED: ${prefix} exists but is not a conda environment; move it out of the way."
+            FAILURES=$((FAILURES + 1))
+            return 0
+        fi
+        echo "  Rebuilding ${prefix} from $(basename "$lock")..."
+        rm -rf "$prefix"
+    else
+        echo "  Creating ${prefix} from $(basename "$lock")..."
+    fi
+    mkdir -p "$(dirname "$prefix")"
+    $CONDA_CMD create -y -p "$prefix" --file "$lock"
+    echo "$want" > "$stamp"
+}
+TRIPLE_LIFTOVER_DIR="${TRIPLE_LIFTOVER_DIR:-${TOOLS_DIR}/triple-liftOver}"
+
+mkdir -p "$TOOLS_DIR" "$IMG_DIR" "$BIN_DIR" "$SRC_DIR"
 
 export PATH="${BIN_DIR}:${PATH}"
 export APPTAINER_BINDPATH
@@ -38,21 +98,18 @@ echo " (Hybrid: Compiled + Apptainer Mode)"
 echo " Host: $(hostname) | glibc: $(ldd --version | head -1)"
 echo "=========================================="
 
-# ── 1. Compiled Tools (htslib, samtools, bcftools) ────────────────────────────
+# ── 1. Compiled Tools (htslib, bcftools) ──────────────────────────────────────
 echo ""
-echo "[1/4] Compiling core utilities from source..."
+echo "[1/6] Compiling core utilities from source..."
 
-# URLs provided by user
 HTSLIB_URL="https://github.com/samtools/htslib/releases/download/1.23.1/htslib-1.23.1.tar.bz2"
-SAMTOOLS_URL="https://github.com/samtools/samtools/releases/download/1.23.1/samtools-1.23.1.tar.bz2"
 BCFTOOLS_URL="https://github.com/samtools/bcftools/releases/download/1.23.1/bcftools-1.23.1.tar.bz2"
-MINIMAC4_URL="https://github.com/statgen/Minimac4/releases/download/v4.1.6/minimac4-4.1.6-Linux-x86_64.sh"
 
 # 1a. HTSLIB
 if [ ! -f "${BIN_DIR}/tabix" ]; then
     echo "  Compiling htslib..."
     cd "${SRC_DIR}"
-    curl -sL "$HTSLIB_URL" -o htslib.tar.bz2
+    curl -fsSL "$HTSLIB_URL" -o htslib.tar.bz2
     tar -xjf htslib.tar.bz2
     cd htslib-1.23.1
     ./configure --prefix="${TOOLS_DIR}" LDFLAGS="${RPATH_FLAGS}"
@@ -63,26 +120,11 @@ else
     echo "  ✓ htslib (already installed)"
 fi
 
-# 1b. SAMTOOLS
-if [ ! -f "${BIN_DIR}/samtools" ]; then
-    echo "  Compiling samtools..."
-    cd "${SRC_DIR}"
-    curl -sL "$SAMTOOLS_URL" -o samtools.tar.bz2
-    tar -xjf samtools.tar.bz2
-    cd samtools-1.23.1
-    ./configure --prefix="${TOOLS_DIR}" --with-htslib="${TOOLS_DIR}" LDFLAGS="${RPATH_FLAGS}"
-    make -j4
-    make install
-    echo "  ✓ samtools"
-else
-    echo "  ✓ samtools (already installed)"
-fi
-
-# 1c. BCFTOOLS
+# 1b. BCFTOOLS
 if [ ! -f "${BIN_DIR}/bcftools" ]; then
     echo "  Compiling bcftools..."
     cd "${SRC_DIR}"
-    curl -sL "$BCFTOOLS_URL" -o bcftools.tar.bz2
+    curl -fsSL "$BCFTOOLS_URL" -o bcftools.tar.bz2
     tar -xjf bcftools.tar.bz2
     cd bcftools-1.23.1
     ./configure --prefix="${TOOLS_DIR}" --with-htslib="${TOOLS_DIR}" LDFLAGS="${RPATH_FLAGS}"
@@ -93,29 +135,17 @@ else
     echo "  ✓ bcftools (already installed)"
 fi
 
-# 1d. Minimac4 static binary
-if [ ! -x "${BIN_DIR}/minimac4.native" ]; then
-    echo "  Installing Minimac4 static binary..."
-    curl -fsSL "$MINIMAC4_URL" -o "${BIN_DIR}/minimac4.native"
-    chmod +x "${BIN_DIR}/minimac4.native"
-    echo "  ✓ minimac4 static binary"
-else
-    echo "  ✓ minimac4 static binary (already installed)"
-fi
-
-# 1e. PLINK2 via bioconda (installed into renv conda env; avoids container/SIF issues)
-# Remove any previously downloaded invalid .sif file
+# PLINK2 comes from bioconda (its own pinned conda env, step 5);
+# remove any previously downloaded invalid .sif file.
 rm -f "${IMG_DIR}/plink2.sif"
 
 # ── 2. Container Images ───────────────────────────────────────────────────────
 echo ""
-echo "[2/4] Pulling Apptainer images for complex tools..."
+echo "[2/6] Pulling Apptainer images for complex tools..."
 
 declare -A CONTAINERS=(
     ["plink"]="quay.io/biocontainers/plink:1.90b7.7--h18e278d_1"
-    ["eagle"]="quay.io/biocontainers/eagle:0.9.0--py34_0"
     ["shapeit5"]="quay.io/biocontainers/shapeit5:5.1.1--h34261f4_2"
-    ["picard"]="quay.io/biocontainers/picard:3.4.0--hdfd78af_0"
     ["liftover"]="quay.io/biocontainers/ucsc-liftover:469--h9b8f530_0"
 )
 
@@ -126,11 +156,11 @@ for tool in "${!CONTAINERS[@]}"; do
         if ! apptainer pull --name "$img_path" "docker://${CONTAINERS[$tool]}"; then
             echo "  ⚠ Pull failed. Attempting direct download from Galaxy Project Depot..."
             # Convert quay tag to galaxy URL format (usually tool:version--build)
-            # Example: quay.io/biocontainers/eagle:2.4.1--h9ee0642_1 -> eagle:2.4.1--h9ee0642_1
+            # Example: quay.io/biocontainers/plink:1.90b7.7--h18e278d_1 -> plink:1.90b7.7--h18e278d_1
             TAG_ONLY=$(echo "${CONTAINERS[$tool]}" | sed 's|.*/||')
             GALAXY_URL="https://depot.galaxyproject.org/singularity/${TAG_ONLY}"
-            
-            if ! curl -sL "$GALAXY_URL" -o "$img_path"; then
+
+            if ! curl -fsSL "$GALAXY_URL" -o "$img_path"; then
                 echo "  ✗ FAILED: Could not pull or download ${tool}"
                 rm -f "$img_path"
             else
@@ -144,11 +174,9 @@ for tool in "${!CONTAINERS[@]}"; do
     fi
 done
 
-# ── 3. Wrapper Scripts & Manual Downloads ─────────────────────────────────────
+# ── 3. Wrapper Scripts ────────────────────────────────────────────────────────
 echo ""
-echo "[3/4] Creating wrappers and downloading manual tools..."
-
-# Apptainer Wrappers (Only for tools not compiled in step 1)
+echo "[3/6] Creating wrappers..."
 
 # plink
 cat > "${BIN_DIR}/plink" << EOF
@@ -159,19 +187,7 @@ EOF
 # plink2
 cat > "${BIN_DIR}/plink2" << EOF
 #!/bin/bash
-exec "${RENV_PATH}/bin/plink2" "\$@"
-EOF
-
-# eagle
-cat > "${BIN_DIR}/eagle" << EOF
-#!/bin/bash
-apptainer exec "${IMG_DIR}/eagle.sif" Eagle "\$@"
-EOF
-
-# minimac4
-cat > "${BIN_DIR}/minimac4" << EOF
-#!/bin/bash
-exec "${BIN_DIR}/minimac4.native" "\$@"
+exec "${PLINK2_ENV}/bin/plink2" "\$@"
 EOF
 
 # shapeit5
@@ -180,136 +196,71 @@ cat > "${BIN_DIR}/shapeit5" << EOF
 apptainer exec "${IMG_DIR}/shapeit5.sif" SHAPEIT5_phase_common "\$@"
 EOF
 
-# picard
-cat > "${BIN_DIR}/picard" << EOF
-#!/bin/bash
-apptainer exec "${IMG_DIR}/picard.sif" picard "\$@"
-EOF
-
 # liftOver
 cat > "${BIN_DIR}/liftOver" << EOF
 #!/bin/bash
 apptainer exec "${IMG_DIR}/liftover.sif" liftOver "\$@"
 EOF
 
-chmod +x "${BIN_DIR}/plink" "${BIN_DIR}/plink2" "${BIN_DIR}/eagle" "${BIN_DIR}/minimac4" "${BIN_DIR}/shapeit5" "${BIN_DIR}/picard" "${BIN_DIR}/liftOver"
+chmod +x "${BIN_DIR}/plink" "${BIN_DIR}/plink2" "${BIN_DIR}/shapeit5" "${BIN_DIR}/liftOver"
 
-# manual tools logic... (ANNOVAR, conform-gt)
-
-# ANNOVAR
-if [ ! -d "${TOOLS_DIR}/annovar" ]; then
-    echo "  Downloading ANNOVAR..."
-    ANNOVAR_URL="http://www.openbioinformatics.org/annovar/download/0wgxR2rIVP/annovar.latest.tar.gz"
-    curl -sL "$ANNOVAR_URL" -o "${TOOLS_DIR}/annovar.tar.gz"
-    tar -zxf "${TOOLS_DIR}/annovar.tar.gz" -C "${TOOLS_DIR}"
-    rm "${TOOLS_DIR}/annovar.tar.gz"
-    
-    # Create wrappers for main annovar scripts
-    cat > "${BIN_DIR}/annotate_variation.pl" << EOF
-#!/bin/bash
-perl "${TOOLS_DIR}/annovar/annotate_variation.pl" "\$@"
-EOF
-    cat > "${BIN_DIR}/table_annovar.pl" << EOF
-#!/bin/bash
-perl "${TOOLS_DIR}/annovar/table_annovar.pl" "\$@"
-EOF
-    chmod +x "${BIN_DIR}/annotate_variation.pl" "${BIN_DIR}/table_annovar.pl"
-    echo "  ✓ ANNOVAR"
-else
-    echo "  ✓ ANNOVAR (already installed)"
-fi
-
-# conform-gt
-if [ ! -f "${TOOLS_DIR}/conform-gt.jar" ]; then
-    echo "  Downloading conform-gt..."
-    curl -sL "https://faculty.washington.edu/browning/conform-gt/conform-gt.24May16.cee.jar" \
-         -o "${TOOLS_DIR}/conform-gt.jar"
-fi
-
-cat > "${BIN_DIR}/conform-gt" << EOF
-#!/bin/bash
-java -jar "${TOOLS_DIR}/conform-gt.jar" "\$@"
-EOF
-chmod +x "${BIN_DIR}/conform-gt"
-
-# triple-liftOver link
-if [ -d "${TOOLS_DIR}/triple-liftOver" ]; then
-    mkdir -p "${TOOLS_DIR}/triple-liftOver/library"
-    ln -sf "${BIN_DIR}/liftOver" "${TOOLS_DIR}/triple-liftOver/library/liftOver"
-fi
-
-# ── 4. R Packages ─────────────────────────────────────────────────────────────
+# ── 4. triple-liftOver ────────────────────────────────────────────────────────
+# Stage 1 runs ${TRIPLE_LIFTOVER_DIR}/tripleliftover_v133.pl with the chain files in
+# library/chainfiles/ (hg18ToHg38, hg19ToHg38); both ship with the repository.
 echo ""
-echo "[4/5] Installing R packages..."
+echo "[4/6] Installing triple-liftOver..."
+
+TRIPLE_LIFTOVER_COMMIT="f781ed6c5d016eac75b8be92938003207cdf5f0d"
+TRIPLE_LIFTOVER_URL="https://github.com/GraceSheng/triple-liftOver/archive/${TRIPLE_LIFTOVER_COMMIT}.tar.gz"
+
+if [ -f "${TRIPLE_LIFTOVER_DIR}/tripleliftover_v133.pl" ]; then
+    echo "  ✓ triple-liftOver (already installed)"
+elif [ -e "${TRIPLE_LIFTOVER_DIR}" ]; then
+    echo "  ✗ FAILED: ${TRIPLE_LIFTOVER_DIR} exists but has no tripleliftover_v133.pl;"
+    echo "    remove it or point TRIPLE_LIFTOVER_DIR in .env at a valid installation."
+else
+    echo "  Downloading triple-liftOver (${TRIPLE_LIFTOVER_COMMIT:0:7})..."
+    tmp_dir="${SRC_DIR}/triple-liftOver.tmp"
+    rm -rf "$tmp_dir"
+    mkdir -p "$tmp_dir" "$(dirname "${TRIPLE_LIFTOVER_DIR}")"
+    curl -fsSL "$TRIPLE_LIFTOVER_URL" | tar -xz --strip-components=1 -C "$tmp_dir"
+    mv "$tmp_dir" "${TRIPLE_LIFTOVER_DIR}"
+    echo "  ✓ triple-liftOver"
+fi
+
+# triple-liftOver calls library/liftOver next to its script; point that at the
+# containerised liftOver rather than the bundled binary.
+if [ -d "${TRIPLE_LIFTOVER_DIR}/library" ]; then
+    ln -sf "${BIN_DIR}/liftOver" "${TRIPLE_LIFTOVER_DIR}/library/liftOver"
+fi
+
+# ── 5. Conda environments (plink2, R) ─────────────────────────────────────────
+echo ""
+echo "[5/6] Installing plink2 and R from lock files..."
 FAILURES=0
 
-# miniconda's R Makeconf hardcodes /opt/rh/devtoolset-8 (CentOS compiler, absent on Ubuntu).
-# install.packages() compilation always fails. Fix: dedicated conda env with pre-built
-# conda-forge R packages — no compilation involved at all.
+env_from_lock "${PLINK2_ENV}" "${LOCK_DIR}/plink2.lock.txt"
+env_from_lock "${R_ENV}" "${LOCK_DIR}/r.lock.txt"
 
-if [ ! -d "${RENV_PATH}" ]; then
-    echo "  Creating conda R environment (r-base + r-haven + r-tidyverse + plink2)..."
-    "${CONDA_BIN}/conda" create -y -n "${RENV_NAME}" -c conda-forge -c bioconda \
-        r-base r-haven r-tidyverse plink2
-    if [ ! -x "${RENV_PATH}/bin/Rscript" ]; then
-        echo "  ✗ FAILED: conda renv creation failed"
-        FAILURES=$((FAILURES + 1))
-    else
-        echo "  ✓ conda renv (r-base + r-haven + r-tidyverse + plink2)"
-    fi
-else
-    if "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
-        echo "  ✓ conda renv (already set up, haven available)"
-    else
-        echo "  Adding r-haven to existing renv..."
-        "${CONDA_BIN}/conda" install -y -n "${RENV_NAME}" -c conda-forge r-haven r-tidyverse
-        if ! "${RENV_PATH}/bin/Rscript" -e "requireNamespace('haven', quietly=TRUE)" 2>/dev/null; then
-            echo "  ✗ FAILED: r-haven not available in renv after install"
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "  ✓ r-haven added to renv"
-        fi
-    fi
-    # Add plink2 to existing renv if not already present
-    if [ ! -x "${RENV_PATH}/bin/plink2" ]; then
-        echo "  Adding plink2 to renv..."
-        "${CONDA_BIN}/conda" install -y -n "${RENV_NAME}" -c conda-forge -c bioconda plink2
-        if [ ! -x "${RENV_PATH}/bin/plink2" ]; then
-            echo "  ✗ FAILED: plink2 not available in renv after install"
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "  ✓ plink2 added to renv"
-        fi
-    else
-        echo "  ✓ plink2 (already in renv)"
-    fi
-fi
-
-# Wrapper so scripts using Rscript from BIN_DIR pick up the renv automatically
+# Wrapper so scripts using Rscript from BIN_DIR pick up the R environment
 cat > "${BIN_DIR}/Rscript" << EOF
 #!/bin/bash
-exec "${RENV_PATH}/bin/Rscript" "\$@"
+exec "${R_ENV}/bin/Rscript" "\$@"
 EOF
 chmod +x "${BIN_DIR}/Rscript"
 
-# ── 5. Verification ────────────────────────────────────────────────────────────
+# ── 6. Verification ────────────────────────────────────────────────────────────
 echo ""
-echo "[5/5] Verifying tools in ${BIN_DIR}..."
+echo "[6/6] Verifying tools in ${BIN_DIR}..."
 
 # List of tools to check specifically in bin/
 CHECK_TOOLS=(
     "bcftools"
-    "samtools"
     "bgzip"
     "tabix"
     "plink"
     "plink2"
-    "eagle"
     "shapeit5"
-    "picard"
-    "minimac4"
-    "table_annovar.pl"
-    "conform-gt"
     "liftOver"
     "Rscript"
 )
@@ -323,11 +274,22 @@ for tool in "${CHECK_TOOLS[@]}"; do
     fi
 done
 
-# Special check for triple-liftOver
-if [ -d "${TOOLS_DIR}/triple-liftOver" ] && [ -L "${TOOLS_DIR}/triple-liftOver/library/liftOver" ]; then
-    echo "  ✓ triple-liftOver (linked)"
+# plink2 must support --king-cutoff-table (stage-1 duplicate removal, stage-3 relatedness)
+if [ -x "${BIN_DIR}/plink2" ] && plink2_has_king_cutoff_table "${BIN_DIR}/plink2"; then
+    echo "  ✓ plink2 supports --king-cutoff-table"
 else
-    echo "  ✗ FAILED: triple-liftOver not configured correctly"
+    echo "  ✗ FAILED: ${BIN_DIR}/plink2 does not support --king-cutoff-table"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# triple-liftOver: script, both chain files, and the liftOver link
+if [ -f "${TRIPLE_LIFTOVER_DIR}/tripleliftover_v133.pl" ] \
+    && [ -f "${TRIPLE_LIFTOVER_DIR}/library/chainfiles/hg18ToHg38.over.chain.gz" ] \
+    && [ -f "${TRIPLE_LIFTOVER_DIR}/library/chainfiles/hg19ToHg38.over.chain.gz" ] \
+    && [ -L "${TRIPLE_LIFTOVER_DIR}/library/liftOver" ]; then
+    echo "  ✓ triple-liftOver (${TRIPLE_LIFTOVER_DIR})"
+else
+    echo "  ✗ FAILED: triple-liftOver not configured correctly in ${TRIPLE_LIFTOVER_DIR}"
     FAILURES=$((FAILURES + 1))
 fi
 

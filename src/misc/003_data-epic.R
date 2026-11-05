@@ -2,7 +2,8 @@
 options(stringsAsFactors = FALSE)
 usage <- function() {
   cat(
-    "Usage: Rscript src/003_data-epic.R [options]\n",
+    "Usage: Rscript src/misc/003_data-epic.R [options]\n",
+    "       (normally run via: sbatch src/003_data-epic.sh)\n",
     "\n",
     "Build a tab-delimited EPIC study phenotype file from:\n",
     "  genetics_caco.sas7bdat, genetics_id.sas7bdat, genetics.sas7bdat,\n",
@@ -15,7 +16,9 @@ usage <- function() {
     "\n",
     "Options:\n",
     "  --input-dir DIR            Directory containing the SAS files.\n",
-    "  --output FILE              Output txt path.\n",
+    "  --output FILE              Output txt path. Defaults to\n",
+    "                             $EPIC_CASE_STATUS_FILE or\n",
+    "                             <input-dir>/EPIC_study_case_status.txt.\n",
     "  --id-column NAME           ID column to use; default: Idepic_Bio.\n",
     "  --missing-phenotype VALUE  PLINK missing phenotype code; default: -9.\n",
     "  --subj-id-file FILE        Path to Subj_Id_2015.txt for supplementary IDs\n",
@@ -39,7 +42,7 @@ script_path <- function() {
   }
   submit_dir <- Sys.getenv("SLURM_SUBMIT_DIR", "")
   base <- if (nchar(submit_dir) > 0) submit_dir else "."
-  normalizePath(file.path(base, "src/003_data-epic.R"), mustWork = FALSE)
+  normalizePath(file.path(base, "src/misc/003_data-epic.R"), mustWork = FALSE)
 }
 parse_args <- function(args, defaults) {
   opts <- defaults
@@ -410,22 +413,24 @@ main <- function() {
   require_namespace("haven")
   root <- normalizePath(file.path(dirname(script_path()), "..", ".."), mustWork = FALSE)
   default_input_dir <- file.path(root, "data", "reference", "Epic")
+  # output and subj_id_file default to files inside the resolved input dir, so
+  # pointing EPIC_REF_DIR / --input-dir elsewhere moves all three together.
   defaults <- list(
     input_dir = Sys.getenv("EPIC_REF_DIR", default_input_dir),
-    output = Sys.getenv(
-      "EPIC_CASE_STATUS_FILE",
-      file.path(default_input_dir, "EPIC_study_case_status.txt")
-    ),
+    output = Sys.getenv("EPIC_CASE_STATUS_FILE", ""),
     id_column = Sys.getenv("EPIC_CASE_STATUS_ID_COLUMN", "Idepic_Bio"),
     missing_phenotype = as.integer(Sys.getenv("EPIC_MISSING_PHENOTYPE", "-9")),
-    subj_id_file = Sys.getenv(
-      "SUBJ_ID_FILE",
-      file.path(default_input_dir, "Subj_Id_2015.txt")
-    )
+    subj_id_file = Sys.getenv("SUBJ_ID_FILE", "")
   )
   opts <- parse_args(commandArgs(trailingOnly = TRUE), defaults)
   if (is.na(opts$missing_phenotype)) {
     stop("Missing phenotype code must be an integer.", call. = FALSE)
+  }
+  if (!nzchar(opts$output)) {
+    opts$output <- file.path(opts$input_dir, "EPIC_study_case_status.txt")
+  }
+  if (!nzchar(opts$subj_id_file)) {
+    opts$subj_id_file <- file.path(opts$input_dir, "Subj_Id_2015.txt")
   }
   input_dir <- normalizePath(opts$input_dir, mustWork = FALSE)
   output <- normalizePath(opts$output, mustWork = FALSE)

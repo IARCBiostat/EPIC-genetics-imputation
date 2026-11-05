@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 set -euo pipefail
 trap 'echo "ERROR: Imputation pipeline failed on line $LINENO" >&2; exit 1' ERR
@@ -44,7 +44,7 @@ Options:
   --chromosomes <list>   Comma-separated chromosomes to process (default: all; e.g. 22)
   --out <dir>            Analysis root where <STUDY>/stage2/ will be written
   --stage1-root <dir>    Root directory containing analysis/<STUDY>/stage1 outputs
-  --partition <name>     Slurm partition for internal Nextflow task submissions
+  --partition <name>     Slurm partition for Nextflow tasks (default: PARTITION in .env)
   --queue-size <n>       Nextflow Slurm executor queue size (default: 1000)
   --cache-mode <mode>    Nextflow task cache mode (default: deep)
   --no-empirical-validation
@@ -73,28 +73,17 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-
-  if ! command -v sbatch >/dev/null 2>&1; then
-    echo "ERROR: sbatch is not available. Submit this script from the HPC login node." >&2
-    exit 1
-  fi
-
-  echo "Submitting imputation pipeline to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name "${IMPUTATION_JOB_NAME:-imputation_pipeline}" \
-    --output "${IMPUTATION_LOG_OUT:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.out}" \
-    --error "${IMPUTATION_LOG_ERR:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.err}" \
-    --time "${IMPUTATION_TIME:-10-00:00:00}" \
-    --mem "${IMPUTATION_MEM:-32G}" \
-    --cpus-per-task "${IMPUTATION_CPUS:-4}" \
-    --partition "${IMPUTATION_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}" "$@"
-  exit 0
-fi
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/005_stage2.sh \
+  --job-name "${IMPUTATION_JOB_NAME:-imputation_pipeline}" \
+  --output "${IMPUTATION_LOG_OUT:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.out}" \
+  --error "${IMPUTATION_LOG_ERR:-${PROJ_ROOT}/src/logs/004_pipeline_imputation_%j.err}" \
+  --time "${IMPUTATION_TIME:-10-00:00:00}" \
+  --mem "${IMPUTATION_MEM:-32G}" \
+  --cpus-per-task "${IMPUTATION_CPUS:-4}" \
+  -- "$@"
 
 start_time=$(date +%s)
 
@@ -103,7 +92,7 @@ STUDY="${IMPUTATION_STUDY:-all}"
 CHROMOSOMES="${IMPUTATION_CHROMOSOMES:-all}"
 OUTDIR="${IMPUTATION_OUTDIR:-${SCRATCH_RUN}/studies}"
 STAGE1_ROOT="${IMPUTATION_STAGE1_ROOT:-${SCRATCH_RUN}/studies}"
-SLURM_PARTITION="${IMPUTATION_PARTITION:-${SLURM_JOB_PARTITION:-low_p}}"
+SLURM_PARTITION="${PARTITION}"
 REF_1000G_DIR="${IMPUTATION_REF_1000G_DIR:-${PROJ_ROOT}/data/reference/1000G}"
 FASTA_REF="${IMPUTATION_FASTA_REF:-${REF_1000G_DIR}/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
 SHAPEIT5_MAP_DIR="${STAGE2_SHAPEIT5_MAP_DIR:-${PROJ_ROOT}/data/reference/shapeit5/maps}"
@@ -221,37 +210,14 @@ else
     PLINK_BIN="${PLINK_BIN:-plink}"
 fi
 export PLINK_BIN
+# Each task runs in its own conda environment (created from envs/*.lock.txt), which
+# Nextflow puts first on the task's PATH, so these names resolve to that environment's
+# pinned tools. Do not resolve absolute paths from the conda cache here: that picked
+# whichever environment was found first, so reruns mixed tool versions across tasks.
 export BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 export SHAPEIT5_COMMON_BIN="${SHAPEIT5_COMMON_BIN:-SHAPEIT5_phase_common}"
-# Resolve tool binaries to full paths from the Nextflow conda cache so SLURM
-# workers don't need conda activation to find them.
-_shapeit5_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "SHAPEIT5_phase_common" -type f 2>/dev/null | head -1) || true
-if [ -n "${_shapeit5_bin}" ] && [ -x "${_shapeit5_bin}" ]; then
-    export SHAPEIT5_COMMON_BIN="${_shapeit5_bin}"
-fi
-unset _shapeit5_bin
-
-_bcftools_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "bcftools" \( -type f -o -type l \) 2>/dev/null | head -1) || true
-if [ -n "${_bcftools_bin}" ] && [ -x "${_bcftools_bin}" ]; then
-    export BCFTOOLS_BIN="${_bcftools_bin}"
-fi
-unset _bcftools_bin
 export MINIMAC4_BIN="${MINIMAC4_BIN:-minimac4}"
-_minimac4_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 3 -name "minimac4" \( -type f -o -type l \) 2>/dev/null | head -1) || true
-if [ -n "${_minimac4_bin}" ] && [ -x "${_minimac4_bin}" ]; then
-    export MINIMAC4_BIN="${_minimac4_bin}"
-fi
-unset _minimac4_bin
 export PYTHON3_BIN="${PYTHON3_BIN:-python3}"
-# Resolve to a Python 3.10+ that has pandas+matplotlib (needed by REPORTING).
-_python3_bin=$(find "${CONDA_CACHE_DIR}" -maxdepth 4 -name "python3" 2>/dev/null | while IFS= read -r _p; do
-    [ -x "${_p}" ] || continue
-    "${_p}" -c "import pandas, matplotlib, sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null && printf '%s\n' "${_p}" && break
-done) || true
-if [ -n "${_python3_bin}" ] && [ -x "${_python3_bin}" ]; then
-    export PYTHON3_BIN="${_python3_bin}"
-fi
-unset _python3_bin
 
 source "$(conda info --base)/etc/profile.d/conda.sh" || true
 conda activate nf_EPIC-genetics || true
@@ -289,6 +255,40 @@ fi
 if [ ! -f "${FASTA_REF}" ]; then
   echo "ERROR: Reference FASTA not found: ${FASTA_REF}" >&2
   exit 1
+fi
+
+# Index the reference FASTA once, before Nextflow starts. Otherwise every
+# PREP_REFERENCE task builds ${FASTA_REF}.fai at the same moment on the shared
+# filesystem, and a task can read another's half-written index
+# ("The sequence "chr1" was not found").
+fasta_index_ok() {
+  local fai="${FASTA_REF}.fai" c
+  [ -s "$fai" ] && [ ! "$fai" -ot "${FASTA_REF}" ] || return 1
+  # one well-formed line per sequence, no duplicates, all analysed chromosomes present
+  [ "$(wc -l < "$fai")" -eq "$(grep -c '^>' "${FASTA_REF}")" ] || return 1
+  awk -F'\t' 'NF != 5 || $2 !~ /^[0-9]+$/ {bad=1} END {exit bad}' "$fai" || return 1
+  [ -z "$(cut -f1 "$fai" | sort | uniq -d)" ] || return 1
+  for c in $(seq 1 22) X; do
+    awk -F'\t' -v c="chr${c}" '$1 == c {found=1} END {exit !found}' "$fai" || return 1
+  done
+}
+if ! fasta_index_ok; then
+  FAI_BCFTOOLS="${GENETICS_TOOLS_BIN:-}/bcftools"
+  [ -x "${FAI_BCFTOOLS}" ] || FAI_BCFTOOLS="$(command -v bcftools || true)"
+  if [ -z "${FAI_BCFTOOLS}" ]; then
+    echo "ERROR: bcftools not found to index ${FASTA_REF}; rerun sbatch src/000_tools.sh" >&2
+    exit 1
+  fi
+  echo "Indexing reference FASTA once before launching tasks: ${FASTA_REF}.fai"
+  rm -f "${FASTA_REF}.fai"
+  # bcftools norm -f builds the .fai when it loads the FASTA; a header-only VCF is enough.
+  printf '##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n' \
+    | "${FAI_BCFTOOLS}" norm --no-version -f "${FASTA_REF}" -Ov -o /dev/null || true
+  if ! fasta_index_ok; then
+    echo "ERROR: ${FASTA_REF} could not be indexed: it may be incomplete or corrupt." >&2
+    echo "       Delete it and rerun sbatch src/002_data-reference.sh to download it again." >&2
+    exit 1
+  fi
 fi
 
 if [ ! -d "${SHAPEIT5_MAP_DIR}" ] || [ -z "$(ls "${SHAPEIT5_MAP_DIR}"/chr*.b38.gmap.gz 2>/dev/null)" ]; then

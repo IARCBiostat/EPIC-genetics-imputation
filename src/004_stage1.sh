@@ -5,7 +5,7 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 # Script: src/004_stage1.sh
 # Purpose: Run stage-1 preprocessing for all bespoke dataset scripts in pipeline_stage1/scripts.
@@ -14,11 +14,11 @@
 # Interactive single-study test
 # Copy/paste these lines in an HPC shell to test Brea_01_Erneg directly:
 #
-# cd /data/Epic/subprojects/Genetics/work
+# cd /path/to/EPIC-genetics-imputation   # repository root (GENETICS_PROJECT_ROOT)
 # set -a
 # source .env
 # set +a
-# python3 /data/Epic/subprojects/Genetics/work/pipeline_stage1/scripts/process_brea_01_erneg.py \
+# python3 "${GENETICS_PROJECT_ROOT}/pipeline_stage1/scripts/process_brea_01_erneg.py" \
 #   --data-root "${STAGE1_DATA_ROOT}" \
 #   --work-root "${STAGE1_WORK_ROOT}" \
 #   --plink "${PLINK_BIN}" \
@@ -80,28 +80,16 @@ fi
 set -a; source "$ENV_FILE"; set +a
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
-if [ -z "${SLURM_JOB_ID:-}" ]; then
-  mkdir -p "${PROJ_ROOT}/src/logs"
-  cd "$PROJ_ROOT"
-
-  if ! command -v sbatch >/dev/null 2>&1; then
-    echo "ERROR: sbatch is not available. Run this script on the HPC login node or submit it with Slurm." >&2
-    exit 1
-  fi
-
-  echo "Submitting Stage-1 processing to Slurm..."
-  sbatch \
-    --export=ALL \
-    --job-name "${STAGE1_JOB_NAME:-stage1_process}" \
-    --output "${STAGE1_LOG_OUT:-${PROJ_ROOT}/src/logs/003_process_%j.out}" \
-    --error "${STAGE1_LOG_ERR:-${PROJ_ROOT}/src/logs/003_process_%j.err}" \
-    --time "${STAGE1_TIME:-10-00:00:00}" \
-    --mem "${STAGE1_MEM:-32G}" \
-    --cpus-per-task "${STAGE1_CPUS:-2}" \
-    --partition "${STAGE1_PARTITION:-low_p}" \
-    "${SCRIPT_PATH}"
-  exit 0
-fi
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/004_stage1.sh \
+  --job-name "${STAGE1_JOB_NAME:-stage1_process}" \
+  --output "${STAGE1_LOG_OUT:-${PROJ_ROOT}/src/logs/003_process_%j.out}" \
+  --error "${STAGE1_LOG_ERR:-${PROJ_ROOT}/src/logs/003_process_%j.err}" \
+  --time "${STAGE1_TIME:-10-00:00:00}" \
+  --mem "${STAGE1_MEM:-32G}" \
+  --cpus-per-task "${STAGE1_CPUS:-2}"
 
 start_time=$(date +%s)
 
@@ -118,6 +106,12 @@ if [[ "${PLINK_BIN}" == */* ]]; then
   export PATH="$(dirname -- "${PLINK_BIN}"):${PATH}"
 fi
 export PLINK_BIN
+# Use the pinned plink2 installed by 000_tools.sh by absolute path, so no other plink2
+# on PATH (conda base, system, modules) can shadow it in the Slurm tasks.
+PLINK2_BIN="${PLINK2_BIN:-plink2}"
+if [ "${PLINK2_BIN}" = "plink2" ] && [ -x "${GENETICS_TOOLS_BIN:-}/plink2" ]; then
+  PLINK2_BIN="${GENETICS_TOOLS_BIN}/plink2"
+fi
 DATA_ROOT="$(resolve_data_root)"
 WORK_ROOT="${STAGE1_WORK_ROOT:-${SCRATCH_RUN}/stage1/work}"
 SCRIPTS_DIR="${PROJ_ROOT}/pipeline_stage1/scripts"
@@ -131,7 +125,10 @@ if command -v conda >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   source "${CONDA_BASE}/etc/profile.d/conda.sh" || true
   conda activate nf_EPIC-genetics || true
-  export PATH="${CONDA_BASE}/bin:${CONDA_BASE}/condabin:${PATH}"
+  # Nextflow needs the conda command (condabin) to create and activate task environments.
+  # Never put ${CONDA_BASE}/bin first: anything installed in the conda base environment
+  # (e.g. an old plink2) would then shadow the pinned tools of every task environment.
+  export PATH="${CONDA_BASE}/condabin:${PATH}"
 fi
 
 if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/java" ]; then
@@ -193,12 +190,21 @@ mkdir -p "${PROJ_ROOT}/src/logs"
 mkdir -p "${SCRATCH_RUN}/stage1"
 cd "${SCRATCH_RUN}/stage1"
 
-for cmd_name in "${PYTHON3_BIN}" "${PYTHON2_BIN}" "${PLINK_BIN}" perl nextflow; do
+for cmd_name in "${PYTHON3_BIN}" "${PYTHON2_BIN}" "${PLINK_BIN}" "${PLINK2_BIN}" perl nextflow; do
   if ! command -v "$cmd_name" >/dev/null 2>&1; then
     echo "ERROR: Required command not found in PATH: ${cmd_name}" >&2
     exit 1
   fi
 done
+
+# STAGE1_QC removes duplicates with --king-cutoff-table (plink2 builds after 24 Jun 2024);
+# check it here rather than letting every study fail at the end of stage 1.
+PLINK2_VERSION_STR="$("${PLINK2_BIN}" --version 2>/dev/null | head -1 || true)"
+if [[ "$("${PLINK2_BIN}" --king-cutoff-table 2>&1 || true)" != *"--king-cutoff-table requires"* ]]; then
+  echo "ERROR: ${PLINK2_BIN} (${PLINK2_VERSION_STR:-unknown version}) does not support --king-cutoff-table." >&2
+  echo "       Stage-1 QC needs plink2 2.0.0-a.6.9 or later; rerun sbatch src/000_tools.sh to install it." >&2
+  exit 1
+fi
 
 if [ ! -d "$SCRIPTS_DIR" ]; then
   echo "ERROR: Scripts directory not found: ${SCRIPTS_DIR}" >&2
@@ -213,7 +219,7 @@ fi
 
 if [ ! -f "$EPIC_CASE_STATUS_FILE" ]; then
   echo "ERROR: Shared EPIC case-status reference not found: ${EPIC_CASE_STATUS_FILE}" >&2
-  echo "       Run Rscript src/003_data-epic.R first or set EPIC_CASE_STATUS_FILE explicitly." >&2
+  echo "       Run sbatch src/003_data-epic.sh first or set EPIC_CASE_STATUS_FILE explicitly." >&2
   exit 1
 fi
 
@@ -228,6 +234,7 @@ echo "Work root:    ${WORK_ROOT}"
 echo "Python3:      ${PYTHON3_BIN}"
 echo "Python2:      ${PYTHON2_BIN}"
 echo "PLINK:        ${PLINK_BIN}"
+echo "PLINK2:       ${PLINK2_BIN} (${PLINK2_VERSION_STR})"
 echo "EPIC status:  ${EPIC_CASE_STATUS_FILE}"
 echo "Force rerun:  ${STAGE1_FORCE}"
 echo "Datasets:     ${#DATASET_SCRIPTS[@]}"
@@ -275,6 +282,7 @@ NF_CMD=(
   --python2_bin "${PYTHON2_BIN}"
   --plink_bin "${PLINK_BIN}"
   --plink2_bin "${PLINK2_BIN}"
+  --slurm_partition "${PARTITION}"
 )
 
 if [ "${RESUME}" = "1" ] && [ "${STAGE1_FORCE}" != "1" ]; then

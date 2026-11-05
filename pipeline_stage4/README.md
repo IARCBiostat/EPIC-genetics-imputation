@@ -1,5 +1,7 @@
 # pipeline_stage4
 
+> Paths written as `analysis/<STUDY>/...` are relative to the analysis root, which the `src/` submission scripts set to `${SCRATCH}/${SCRATCH_DATE}/studies/` from `.env`. Setup and run order are in the [top-level README](../README.md#how-to-run).
+
 Stage 4 assembles the outputs from all preceding pipeline stages into a per-study deliverable. It generates a cross-stage master HTML report integrating stage 2 and stage 3 QC summaries, then packages the finalized PLINK2 files, QC exclude lists, review files, and all HTML reports into a structured archive ready for downstream analysis and dissemination.
 
 This stage consumes stage 3 outputs from `analysis/<STUDY>/stage3/` and stage 2 reports from `analysis/<STUDY>/stage2/report/`, and writes the final deliverable to `final/<STUDY>/`.

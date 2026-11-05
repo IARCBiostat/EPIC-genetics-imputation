@@ -1,3 +1,6 @@
+# Software as used in the June 2026 run. Nextflow creates this environment from the
+# matching .lock.txt: these specs solved as of 2026-06-17, exact linux-64 packages.
+# After editing, regenerate the lock with src/misc/make_env_locks.py.
 name: impute-chrx
 channels:
   - conda-forge
@@ -5,6 +8,8 @@ channels:
   - nodefaults
 dependencies:
   - python=3.12
+  # SHAPEIT5 5.1.1 is compiled against htslib 1.21: keep it on that htslib
   - bcftools=1.21
+  - htslib=1.21
   - shapeit5=5.1.1
   - minimac4=4.1.6

@@ -5,11 +5,26 @@
 #SBATCH --time=10-00:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=2
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
+
+# Script: src/001_data-genetics.sh
+# Purpose: Copy the raw EPIC genetics data this pipeline needs into ${DATA_ROOT}:
+#   study genotypes + chip manifests -> ${DATA_ROOT}/genetics/<STUDY>/
+#   Subj_Id_2015.txt + genetics*.sas7bdat -> ${REF_DIR}/Epic/
+# Usage (from the repository root):
+#   bash src/001_data-genetics.sh --check   # only verify .env and every source path
+#   sbatch src/001_data-genetics.sh         # verify, then copy
 
 set -euo pipefail
 trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
 start_time=$(date +%s)
+
+CHECK_ONLY=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1 ;;
+  "") ;;
+  *) echo "Usage: $0 [--check]" >&2; exit 1 ;;
+esac
 
 # ── Environment ────────────────────────────────────────────────────────────────
 ENV_FILE="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/.env"
@@ -18,30 +33,64 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+[ "$CHECK_ONLY" -eq 1 ] || on_partition src/001_data-genetics.sh -- "$@"  # --check runs here
 PROJ_ROOT="${GENETICS_PROJECT_ROOT}"
 
+# Source locations and layout (see .env). The fallbacks cover an older .env that
+# points GENETICS_DATA_SOURCE_ROOT at the original delivery archive, which holds
+# Reference/Epic/ and Central_Genetics/ next to the category folders.
 SOURCE_ROOT="${GENETICS_DATA_SOURCE_ROOT}"
+SOURCE_LAYOUT="${GENETICS_SOURCE_LAYOUT:-archive}"
+EPIC_REF_SOURCE_DIR="${EPIC_REF_SOURCE_DIR:-${SOURCE_ROOT}/Reference/Epic}"
+CENTRAL_GENETICS_DIR="${CENTRAL_GENETICS_DIR:-${SOURCE_ROOT}/Central_Genetics}"
 DEST_ROOT="${DATA_ROOT}/genetics"
 EPIC_REF_DEST_ROOT="${REF_DIR}/Epic"
 
 echo "=========================================="
-echo " Synchronizing Genetics Data"
-echo " From: $SOURCE_ROOT"
-echo " To:   $DEST_ROOT"
+echo " Source locations"
+echo " Study data:        ${SOURCE_ROOT} (layout: ${SOURCE_LAYOUT})"
+echo " EPIC ID reference: ${EPIC_REF_SOURCE_DIR}"
+echo " Central genetics:  ${CENTRAL_GENETICS_DIR}"
 echo "=========================================="
 
-mkdir -p "$DEST_ROOT"
-mkdir -p "$EPIC_REF_DEST_ROOT"
-
-rsync -avP "${SOURCE_ROOT}/Reference/Epic/Subj_Id_2015.txt" "${EPIC_REF_DEST_ROOT}/Subj_Id_2015.txt"
-rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_caco.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_caco.sas7bdat"
-rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics_id.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_id.sas7bdat"
-rsync -avP "${SOURCE_ROOT}/Central_Genetics/genetics.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics.sas7bdat"
+# ── Check .env before copying anything ────────────────────────────────────────
+ENV_ERRORS=0
+for var in GENETICS_PROJECT_ROOT GENETICS_DATA_SOURCE_ROOT EPIC_REF_SOURCE_DIR CENTRAL_GENETICS_DIR; do
+  val="${!var:-}"
+  if [ -z "$val" ] || [[ "$val" == /CHANGE* || "$val" == /WHERE/* ]]; then
+    echo "ERROR: ${var} is unset or still a placeholder ('${val}')." >&2
+    ENV_ERRORS=1
+    [ "$var" = GENETICS_PROJECT_ROOT ] || SOURCE_UNSET=1
+  fi
+done
+if [ "${SOURCE_UNSET:-0}" -eq 1 ]; then
+  echo "       Set GENETICS_SOURCE_ROOT (or the individual source paths) in .env." >&2
+fi
+if [ "$SOURCE_LAYOUT" != flat ] && [ "$SOURCE_LAYOUT" != archive ]; then
+  echo "ERROR: GENETICS_SOURCE_LAYOUT must be 'flat' or 'archive' (got '${SOURCE_LAYOUT}')." >&2
+  ENV_ERRORS=1
+fi
+REPO_DIR="$(cd "$(dirname "$ENV_FILE")" && pwd -P)"
+if [ "$(cd "$PROJ_ROOT" 2>/dev/null && pwd -P || true)" != "$REPO_DIR" ]; then
+  echo "ERROR: GENETICS_PROJECT_ROOT must be this repository's directory." >&2
+  echo "       .env has:   ${PROJ_ROOT}" >&2
+  echo "       repository: ${REPO_DIR}" >&2
+  ENV_ERRORS=1
+fi
+[ "$ENV_ERRORS" -eq 0 ] || exit 1
 
 # ── Study Definition Mapping ──────────────────────────────────────────────────
 # Format:
 # "StudyFolderName"|"StudySubPath"|"DataFolderName"|"ChipFolderName"|"ExtraPlinkPrefix"|"ExtraPlinkDest"|"ExtraFilePath"|"ExtraFileDest"
-# Optional overrides:
+# StudyFolderName is the folder written under ${DATA_ROOT}/genetics/ (and read by the
+# stage-1 scripts). With the "flat" layout the source already holds one such folder
+# per study, so only StudyFolderName and the *Dest/*FolderName fields are used (to
+# check its contents). With the "archive" layout the remaining fields say where each
+# piece lives in the original delivery archive:
+#   StudySubPath: study folder relative to SOURCE_ROOT
 #   DataFolderName: defaults to Data_Received, use "." for flat sync
 #   ChipFolderName: defaults to Chip_files, use "." to skip chip sync
 #   ExtraPlinkPrefix: source prefix relative to SOURCE_ROOT, synced as .bed/.bim/.fam
@@ -75,17 +124,92 @@ STUDIES=(
     "Uadt_01|Uadt/Uadt_01"
 )
 
-# ── Sync Loop ──────────────────────────────────────────────────────────────────
-for entry in "${STUDIES[@]}"; do
-    IFS="|" read -r STUDY_NAME SUB_PATH DATA_OVERRIDE CHIP_OVERRIDE EXTRA_PLINK_PREFIX EXTRA_PLINK_DEST EXTRA_FILE_PATH EXTRA_FILE_DEST <<< "$entry"
+# Split a STUDIES entry into its fields, applying the folder defaults.
+parse_study_entry() {
+    IFS="|" read -r STUDY_NAME SUB_PATH DATA_OVERRIDE CHIP_OVERRIDE EXTRA_PLINK_PREFIX EXTRA_PLINK_DEST EXTRA_FILE_PATH EXTRA_FILE_DEST <<< "$1"
     DATA_FLD="${DATA_OVERRIDE:-Data_Received}"
     CHIP_FLD="${CHIP_OVERRIDE:-Chip_files}"
-    
+}
+
+# ── Check the source layout ───────────────────────────────────────────────────
+# Every path the sync reads must exist, so a wrong source setting in .env fails
+# here with the full list rather than partway through a multi-hour copy.
+MISSING=()
+N_CHECKED=0
+require() {
+    local kind="$1" path="$2"
+    N_CHECKED=$((N_CHECKED + 1))
+    if [ "$kind" = dir ] && [ ! -d "$path" ]; then MISSING+=("${path}/"); fi
+    if [ "$kind" = file ] && [ ! -f "$path" ]; then MISSING+=("${path}"); fi
+}
+
+require file "${EPIC_REF_SOURCE_DIR}/Subj_Id_2015.txt"
+require file "${CENTRAL_GENETICS_DIR}/genetics_caco.sas7bdat"
+require file "${CENTRAL_GENETICS_DIR}/genetics_id.sas7bdat"
+require file "${CENTRAL_GENETICS_DIR}/genetics.sas7bdat"
+for entry in "${STUDIES[@]}"; do
+    parse_study_entry "$entry"
+    if [ "$SOURCE_LAYOUT" = flat ]; then
+        # The study folder must already hold what the archive sync would produce.
+        base="${SOURCE_ROOT}/${STUDY_NAME}"
+        if [ "$DATA_FLD" != "." ]; then require dir "${base}/${DATA_FLD}"; else require dir "${base}"; fi
+        if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then require dir "${base}/${CHIP_FLD}"; fi
+        if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
+            for ext in bed bim fam; do require file "${base}/${EXTRA_PLINK_DEST}/$(basename "${EXTRA_PLINK_PREFIX}").${ext}"; done
+        fi
+        if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then require file "${base}/${EXTRA_FILE_DEST}"; fi
+    else
+        if [ "$DATA_FLD" != "." ]; then require dir "${SOURCE_ROOT}/${SUB_PATH}/${DATA_FLD}"; else require dir "${SOURCE_ROOT}/${SUB_PATH}"; fi
+        if [[ "$CHIP_FLD" != "." && "$STUDY_NAME" != "Neuro_01" ]]; then require dir "${SOURCE_ROOT}/${SUB_PATH}/${CHIP_FLD}"; fi
+        if [[ -n "${EXTRA_PLINK_PREFIX:-}" && -n "${EXTRA_PLINK_DEST:-}" ]]; then
+            for ext in bed bim fam; do require file "${SOURCE_ROOT}/${EXTRA_PLINK_PREFIX}.${ext}"; done
+        fi
+        if [[ -n "${EXTRA_FILE_PATH:-}" && -n "${EXTRA_FILE_DEST:-}" ]]; then require file "${SOURCE_ROOT}/${EXTRA_FILE_PATH}"; fi
+    fi
+done
+
+if [ "${#MISSING[@]}" -gt 0 ]; then
+    echo "ERROR: ${#MISSING[@]} of ${N_CHECKED} expected source path(s) are missing:" >&2
+    printf '         %s\n' "${MISSING[@]}" >&2
+    echo "       Check the source settings in .env (GENETICS_SOURCE_ROOT, the three" >&2
+    echo "       locations derived from it, and GENETICS_SOURCE_LAYOUT)." >&2
+    exit 1
+fi
+echo "All ${N_CHECKED} source paths found."
+if [ "$CHECK_ONLY" -eq 1 ]; then
+    echo "Check only (--check): nothing copied."
+    exit 0
+fi
+
+echo "=========================================="
+echo " Synchronizing Genetics Data"
+echo " From: $SOURCE_ROOT"
+echo " To:   $DEST_ROOT"
+echo "=========================================="
+
+mkdir -p "$DEST_ROOT"
+mkdir -p "$EPIC_REF_DEST_ROOT"
+
+rsync -avP "${EPIC_REF_SOURCE_DIR}/Subj_Id_2015.txt" "${EPIC_REF_DEST_ROOT}/Subj_Id_2015.txt"
+rsync -avP "${CENTRAL_GENETICS_DIR}/genetics_caco.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_caco.sas7bdat"
+rsync -avP "${CENTRAL_GENETICS_DIR}/genetics_id.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics_id.sas7bdat"
+rsync -avP "${CENTRAL_GENETICS_DIR}/genetics.sas7bdat" "${EPIC_REF_DEST_ROOT}/genetics.sas7bdat"
+
+# ── Sync Loop ──────────────────────────────────────────────────────────────────
+for entry in "${STUDIES[@]}"; do
+    parse_study_entry "$entry"
+
     echo "--- Syncing ${STUDY_NAME} ---"
-    
+
     # Create target paths
     TGT_DIR="${DEST_ROOT}/${STUDY_NAME}"
     mkdir -p "$TGT_DIR"
+
+    # Flat layout: the source study folder is already in pipeline form; copy it whole.
+    if [ "$SOURCE_LAYOUT" = flat ]; then
+        rsync -avP "${SOURCE_ROOT}/${STUDY_NAME}/" "${TGT_DIR}/"
+        continue
+    fi
 
     # 1. Sync Data folder
     if [ "$DATA_FLD" != "." ]; then

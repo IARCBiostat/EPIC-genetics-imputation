@@ -5,7 +5,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=1
-#SBATCH --partition=low_p
+#SBATCH --partition=high_p
 
 set -euo pipefail
 trap 'echo "ERROR: Job failed on line $LINENO" >&2; exit 1' ERR
@@ -18,6 +18,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# Run as a Slurm job on PARTITION from .env (see src/lib/partition.sh).
+# shellcheck source=src/lib/partition.sh
+source "$(dirname "$ENV_FILE")/src/lib/partition.sh"
+on_partition src/003_data-epic.sh -- "$@"
 
 PROJ_ROOT="${SLURM_SUBMIT_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
 
