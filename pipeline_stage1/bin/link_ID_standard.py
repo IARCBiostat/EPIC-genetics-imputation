@@ -208,7 +208,7 @@ with open(fam_file, 'r') as file_fam, open(fam_file_name + '_removeID.txt', 'w')
 		detectedID = ''
 
 		completeID = re.search(r"([^a-zA-Z0-9]|^)([B1-9][0-9])[-_]+(((P[0-9]{4,})|([0-9]{6,}A[0-9]{3,})|([0-9]+))[A-Z]?)([^a-zA-Z0-9]|$)", id_work)
-		if completeID: # if the Fam file ID has two numbers (or B and a number), one or more separators and a string that can be an ID (ex : B1_______P0483 or 82__248296A482 or 52____52526275 or 81___________1)
+		if completeID: # if the Fam file ID has two numbers (or B and a number), one or more separators and a string that can be an ID (ex : B0_______P0000 or 10__000000A000 or 10____00000000 or 10___________0)
 			place = completeID.group(2) # we get the potential "country center"
 			detectedID = completeID.group(3) # and the potential ID
 
