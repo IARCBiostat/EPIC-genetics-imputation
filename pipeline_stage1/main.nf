@@ -351,6 +351,7 @@ workflow {
     ch_scripts = Channel
         .fromPath("${projectDir}/scripts/process_*.py")
         .map { script_path -> tuple(studyFromScript(script_path), script_path.toString()) }
+        .filter { study, script_path -> study != 'Pros_02' } // not used: see the README
         .filter { study, script_path -> params.study == 'all' || included.contains(study) }
 
     ch_raw = STAGE1_RAW_COPY(ch_scripts)

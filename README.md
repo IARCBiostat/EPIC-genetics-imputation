@@ -16,6 +16,8 @@ Stage-specific documentation:
 
 Some code/scripts/functions and processes used in this pipeline are direct copies or adaptations from prior EPIC genetics pipelines by: Joshua Atkins, Marie Breeur, Aurelie Gabriel, Emilie Gerard-Marchant, Manon Knuchel...
 
+The documentation site, with the master report for each study, is at <https://iarcbiostat.github.io/EPIC-genetics-imputation/>. GitHub Pages serves it from `docs/`, which is built from `src/docs/`.
+
 To run the pipeline from a fresh clone, see [How To Run](#how-to-run). Output paths in the stage descriptions below are relative to the run directory `${SCRATCH}/${SCRATCH_DATE}/` (see [Output](#output)).
 
 ## Stage 1: Study Harmonization and Genome-Build Standardization
@@ -43,6 +45,8 @@ Stage 1 converts each raw study delivery into a common hg38 PLINK handoff. Each 
 - study-specific EPIC linkage files
 - the shared EPIC ID reference
 - [triple-liftOver](https://github.com/GraceSheng/triple-liftOver) and its UCSC chain files (`hg18ToHg38`, `hg19ToHg38`) for build conversion to GRCh38
+
+`Pros_02` is not used because of issues with the phenotyping (no backbone). `pipeline_stage1/scripts/process_pros_02.py` stays in the repository, but `src/004_stage1.sh` does not list it and `pipeline_stage1/main.nf` skips it, so it does not run.
 
 ## Stage 2: Phasing and Imputation
 
@@ -355,7 +359,7 @@ analysis requires (e.g. `plink2 --pmerge-list`).
 - read access to the EPIC GWAS raw data (`GENETICS_SOURCE_ROOT`): `1_Raw_Data/data/` (study genotypes and chip manifests), `1_Raw_Data/Reference/Epic/Subj_Id_2015.txt`, and `Central_Genetics/*.sas7bdat`
 - space for the input data: by default steps 2–3 copy the raw genotypes and download the reference panel and dbSNP (tens of GB) into `data/` inside the clone, so clone onto a large project filesystem (not a quota-limited home directory), or point `DATA_ROOT` and `TOOLS_DIR` in `.env` elsewhere
 
-Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`. Each job script can be started with `sbatch src/<script>` or `bash src/<script>`: either way it runs on `PARTITION` from `.env` (a job that Slurm starts on another partition resubmits itself there).
+Run every command below from the repository root. The scripts find `.env` in the directory they are submitted from, and Slurm writes their logs to `src/logs/`, which step 1 creates. Each job script can be started with `sbatch src/<script>` or `bash src/<script>`: either way it runs on `PARTITION` from `.env` (a job that Slurm starts on another partition resubmits itself there).
 
 ### Fixed software versions
 
@@ -477,9 +481,29 @@ With all stages finished we generate the master cross-stage HTML reports and bui
 sbatch src/007_stage4.sh
 ```
 
+### 7: update the summary tables and documentation site
+
+This copies the master reports and summaries from scratch to `analysis/final/`, regenerates the sample overlap plot, updates the [Summary Table](#summary-table) and totals in this README and in `src/docs/`, and rebuilds the site in `docs/` with MkDocs (`envs/mkdocs.yml`). `analysis/` is ignored by git and stays on the server. The environment comes from `envs/documentation.yml`.
+
+```bash
+sbatch src/008_documentation.sh
+git add docs/ src/docs/ README.md
+```
+
+Commit and push the result: GitHub Pages publishes `docs/` from `main`.
+
+### 8: copy the final data off scratch
+
+This copies `${SCRATCH}/${SCRATCH_DATE}/final/` to `${GENETICS_PROJECT_ROOT}/${SCRATCH_DATE}/` and compares file counts. Run step 7 first, because `--delete-source` removes the scratch copy once the counts match:
+
+```bash
+sbatch src/copy.sh                  # copy and verify, leave scratch in place
+sbatch src/copy.sh --delete-source  # copy, verify and remove the scratch copy
+```
+
 ### testing/other
 
-We can perform a test across a single study if needed; we use `Glbd_01` for testing as it is the smallest study:
+We can perform a test across a single study if needed; we use `Glbd_01` for testing as it is the smallest study. Set a new `SCRATCH_DATE` first (e.g. `test-Glbd_01`) so the test stays apart from production outputs:
 
 ```bash
 STAGE1_SCRIPTS=process_glbd_01.py sbatch src/004_stage1.sh

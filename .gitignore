@@ -4,10 +4,10 @@
 
 # Allow documentation
 !/README.md
-!/walkthrough.md
 # .env is a placeholder template that users edit in place. Never commit changes to it:
 # git pull leaves each user's edited copy alone only while the repository copy is unchanged.
 !/.env
+# GitHub Pages serves docs/; src/docs/ holds its sources
 !/docs/
 !/envs/
 
@@ -18,38 +18,42 @@
 !/pipeline_stage4/
 !/src/
 
+# Real settings; the tracked .env holds placeholders
+.env.epic
+
+# Local work in progress
+/temp/
+
+# Data and outputs (contain sample IDs): never commit
+/data/
+/analysis/
+*.csv
+*.tsv
+*.fam
+*.psam
+*.sample
+*.sas7bdat
+*.RData
+*.exclude
+*.kin0
+
 # Exclude specific sub-directories and files within allowed paths
 /src/test/
-# Keep src/logs/ itself (Slurm cannot open #SBATCH --output in a missing directory)
-/src/logs/*
-!/src/logs/.gitkeep
+# src/000_env.sh creates src/logs/
+/src/logs/
 /pipeline_stage1/.nextflow_work/
-/pipeline_stage1/work/
-/pipeline_stage2/work/
-/pipeline_stage2/conda/
 /pipeline_stage2/logs/
-/pipeline_stage2/.nextflow/
-/pipeline_stage2/.nextflow.log*
-/pipeline_stage3/work/
-/pipeline_stage3/conda/
-/pipeline_stage3/.nextflow/
-/pipeline_stage3/.nextflow.log*
-/pipeline_stage4/work/
-/pipeline_stage4/conda/
-/pipeline_stage4/.nextflow/
-/pipeline_stage4/.nextflow.log*
+work/
+conda/
+.nextflow/
+.nextflow.log*
 
 # Global ignores (even in allowed paths)
 .DS_Store
+._*
 __pycache__/
 *.pyc
 *.zip
 *.tar.gz
 *.log
 *.tmp
-*.csv
-!/pipeline_stage2/*.csv
-!/src/*.csv
-
-# Analysis outputs (contain sample IDs — not for version control)
-/analysis/

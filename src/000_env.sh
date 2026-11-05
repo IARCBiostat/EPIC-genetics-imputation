@@ -30,6 +30,9 @@ if [ "$(cd "${GENETICS_PROJECT_ROOT:-}" 2>/dev/null && pwd -P || true)" != "$REP
 fi
 PYTHON2_ENV="${PYTHON2_ENV:-${GENETICS_PROJECT_ROOT}/.conda/py27}"
 
+# Slurm opens the #SBATCH log paths before a job starts, so the folder must exist first.
+mkdir -p "${REPO_DIR}/src/logs"
+
 echo "=========================================="
 echo " Setting up EPIC Genetics Nextflow Environment"
 echo "=========================================="
